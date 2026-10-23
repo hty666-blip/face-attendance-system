@@ -1,0 +1,8 @@
+.face-dialog {
+  max-width: 94vw;
+}
+.face-dialog .el-dialog__body {
+  max-height: calc(90vh - 128px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}

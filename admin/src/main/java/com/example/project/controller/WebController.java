@@ -1,19 +1,10 @@
 package com.example.project.controller;
 
-import cn.dev33.satoken.annotation.SaIgnore;
-import cn.dev33.satoken.stp.StpUtil;
-import cn.hutool.core.collection.CollectionUtil;
-import cn.hutool.json.JSONUtil;
-import com.example.project.common.FaceContrastServer;
 import com.example.project.common.Result;
 import com.example.project.common.annotation.AutoLog;
 import com.example.project.controller.domain.LoginDTO;
 import com.example.project.controller.domain.UserRequest;
-import com.example.project.entity.Records;
-import com.example.project.entity.Rules;
 import com.example.project.entity.User;
-import com.example.project.service.IRecordsService;
-import com.example.project.service.IRulesService;
 import com.example.project.service.IUserService;
 import com.example.project.utils.SessionUtils;
 import io.swagger.annotations.Api;
@@ -22,26 +13,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
-import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Map;
 
-@Api(tags = "无权限接口列表")
+@Api(tags = "会话与用户接口")
 @RestController
 @Slf4j
 public class WebController {
-    @Resource private com.example.project.service.impl.FaceCheckInService checkInService;
+    @Resource private com.example.project.face.FaceSessionService faceSessions;
 
     @Resource
     IUserService userService;
-    @Resource
-    private FaceContrastServer faceContrastServer;
-    @Resource
-    private IRecordsService recordsService;
-    @Resource
-    private IRulesService rulesService;
 
     @GetMapping("/getCurrentUser")
     public User getLoginUser(){
@@ -122,24 +102,16 @@ public class WebController {
     @AutoLog("更新人脸信息")
     @PostMapping("/updateFace")
     public Result updateFace(@RequestBody User input) {
-        if (input.getId() == null || userService.getById(input.getId()) == null)
-            throw new com.example.project.exception.ServiceException("用户不存在");
-        if (input.getFace() == null || input.getFace().length() > 7_000_000 || !input.getFace().startsWith("data:image/"))
-            throw new com.example.project.exception.ServiceException("请先采集有效的人脸图片");
-        User patch = new User(); patch.setId(input.getId()); patch.setFace(input.getFace());
-        userService.updateById(patch); return Result.success("录入人脸成功");
+        throw new com.example.project.exception.ServiceException("409", "请使用员工人脸管理中的三张照片采集接口");
     }
 
     /**
-     * 人脸验证
-     * @param imageBase
-     * @return
+     * 以当前登录用户和短期会话验证本人，并在事务中写入考勤。
      */
     @AutoLog("人脸验证")
     @PostMapping("/faceVerify")
 
     public Result faceVerify(@RequestBody com.example.project.controller.domain.FaceDto input, @RequestParam String address) {
-        checkInService.checkIn(input.getImageBase(), address);
-        return Result.success();
+        return Result.success(faceSessions.verify(input.getChallengeId(), input.getImageBase(), address));
     }
 }

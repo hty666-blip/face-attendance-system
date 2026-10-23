@@ -18,6 +18,7 @@ public class AccountLifecycleService {
     @Resource private IEmployeeService employees;
     @Resource private IManagerService managers;
     @Resource private IDeptService departments;
+    @Resource private com.example.project.face.FaceTemplateService faceTemplates;
 
     @Transactional public void createUser(User input) {
         if (input.getId() != null) throw new ServiceException("新增账号不能指定编号");
@@ -95,7 +96,11 @@ public class AccountLifecycleService {
                 throw new ServiceException("请先解除部门主管关联再停用账号");
             targets.add(u);
         }
-        for (User u : targets) { users.removeById(u.getId()); StpUtil.logout(u.getUid()); }
+        for (User u : targets) {
+            faceTemplates.purgeForDeactivation(u.getId());
+            if(!users.removeById(u.getId())) throw new ServiceException("账号停用失败，请稍后重试");
+            StpUtil.logout(u.getUid());
+        }
     }
     @Transactional public void deleteEmployees(List<Integer> ids) {
         deleteUsers(ids.stream().map(id -> {

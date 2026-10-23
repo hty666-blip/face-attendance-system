@@ -24,6 +24,7 @@ public class FaceContrastServer {
             ClientProfile profile = new ClientProfile(); profile.setHttpProfile(http);
             IaiClient client = new IaiClient(new Credential(secretId, secretKey), region, profile);
             CompareFaceRequest request = new CompareFaceRequest();
+            request.setFaceModelVersion("3.0");
             request.setImageA(normalize(imageA)); request.setImageB(normalize(imageB));
             CompareFaceResponse response = client.CompareFace(request);
             result.put("score", response.getScore()); result.put("code",200);

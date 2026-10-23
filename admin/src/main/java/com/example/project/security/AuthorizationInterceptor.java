@@ -47,6 +47,14 @@ public class AuthorizationInterceptor implements HandlerInterceptor {
         if ("/faceVerify".equals(path) && "POST".equals(method)) {
             StpUtil.checkPermission("records.add"); return true;
         }
+        if (path.startsWith("/face/")) {
+            if ("GET".equals(method) && ("/face/status".equals(path) || "/face/service-status".equals(path))) return true;
+            if ("POST".equals(method) && "/face/challenge".equals(path)) {StpUtil.checkPermission("records.add");return true;}
+            if ("POST".equals(method) && Arrays.asList("/face/enroll","/face/migrate","/face/revoke").contains(path)) {
+                policy.adminOnly();StpUtil.checkPermission("employee.edit");return true;
+            }
+            AccessPolicy.deny();
+        }
         if (path.startsWith("/file/")) return true; // 文件内部检查所有者与共享图片属性。
         if (path.startsWith("/statistics/") && "GET".equals(method)) {
             if (!Arrays.asList("ADMIN", "manager").contains(SessionUtils.getUser().getRole())) AccessPolicy.deny();

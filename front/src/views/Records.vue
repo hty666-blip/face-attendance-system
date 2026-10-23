@@ -1,9 +1,9 @@
 <script setup>
-const videoWidth = 200;
-const videoHeight = 200;
 import {downloadExport} from "@/utils/download";
-import router from "@/router";
-import {nextTick,onMounted, reactive, ref, shallowRef, onBeforeUnmount,onUpdated,watch} from "vue";
+import CameraCapture from "@/components/CameraCapture.vue";
+import {CheckInAttempt} from "@/utils/face-checkin.mjs";
+import '@/assets/css/face-dialog.css';
+import {nextTick, reactive, ref, shallowRef, onBeforeUnmount, watch} from "vue";
 import request from "@/utils/request";
 import {ElMessage} from "element-plus";
 import config from "../../config";
@@ -157,217 +157,65 @@ const handleImgUploadSuccess = (res) => {
   ElMessage.success('上传成功')
 }
 
-//人脸识别门禁
+// 本次打卡的照片仅保留在内存；网络结果未知时复用原请求。
 const dialogFaceFormVisible = ref(false)
-const faceRecord = () =>{
-  dialogFaceFormVisible.value = true;
-  initMap()
+const checkIn = reactive(new CheckInAttempt(request))
+const camera = ref()
+const locationError = ref(''), locating = ref(false), address = ref('')
+const map = shallowRef(null)
+let locationGeneration = 0
+const stopLocation = () => {
+  locationGeneration++; locating.value = false
+  map.value?.destroy(); map.value = null
 }
-
-state.faceOption ={};
-state.cameraState = false
-state.faceImgState = false
-state.faceObj = {
-  id:null,
-  face:'',
-}
-//获取摄像头权限
-const getCamera =(option) =>{
-  option.thisCancas = document.getElementById(option.canvasId);
-  option.thisContext = option.thisCancas.getContext("2d");
-  option.thisVideo = document.getElementById(option.videoId);
-  option.thisVideo.style.display = "block";
-  // 获取媒体属性，旧版本浏览器可能不支持mediaDevices，我们首先设置一个空对象
-  if (navigator.mediaDevices === undefined) {
-    navigator.mediaDevices = {};
+const locate = async () => {
+  stopLocation(); address.value = ''; locationError.value = ''; locating.value = true
+  const generation = locationGeneration
+  const current = () => generation === locationGeneration && dialogFaceFormVisible.value
+  if (!config.key || !config.securityJsCode) {
+    locationError.value = '地图尚未配置，请联系管理员填写地图配置后重试。'; locating.value = false; return
   }
-  // 一些浏览器实现了部分mediaDevices，我们不能只分配一个对象
-  // 使用getUserMedia，因为它会覆盖现有的属性。
-  // 这里，如果缺少getUserMedia属性，就添加它。
-  if (navigator.mediaDevices.getUserMedia === undefined) {
-    navigator.mediaDevices.getUserMedia = function (constraints) {
-      // 首先获取现存的getUserMedia(如果存在)
-      var getUserMedia =
-          navigator.webkitGetUserMedia ||
-          navigator.mozGetUserMedia ||
-          navigator.getUserMedia;
-      // 有些浏览器不支持，会返回错误信息
-      // 保持接口一致
-      if (!getUserMedia) {
-        //不存在则报错
-        return Promise.reject(
-            new Error("getUserMedia is not implemented in this browser")
-        );
-      }
-      // 否则，使用Promise将调用包装到旧的navigator.getUserMedia
-      return new Promise(function (resolve, reject) {
-        getUserMedia.call(navigator, constraints, resolve, reject);
-      });
-    };
-  }
-  var constraints = {
-    audio: false,
-    video: {
-      width: option.videoWidth,
-      height: option.videoHeight,
-      transform: "scaleX(-1)",
-    },
-  };
-  navigator.mediaDevices
-      .getUserMedia(constraints)
-      .then(function (stream) {
-        // 旧的浏览器可能没有srcObject
-        if ("srcObject" in option.thisVideo) {
-          option.thisVideo.srcObject = stream;
-        } else {
-          // 避免在新的浏览器中使用它，因为它正在被弃用。
-          option.thisVideo.src = window.URL.createObjectURL(stream);
-        }
-        option.thisVideo.onloadedmetadata = function (e) {
-          option.thisVideo.play();
-        };
-      })
-      .catch((err) => {
-        console.log(err);
-      });
-  return option
-}
-/**
- * 绘制图片
- * 返回格式为base64
- * @param option
- */
-const draw = (option) =>{
-  option.thisContext.drawImage(option.thisVideo,0,0,200,200);
-  return option.thisCancas.toDataURL("image/png");
-}
-// 监听弹出层 设置摄像头是否开启
-watch(() => dialogFaceFormVisible.value, (newValue, oldValue) => {
-  if (newValue){
-    setTimeout(()=>{
-      // 开启摄像头
-      state.faceOption = getCamera({
-        videoWidth: 200,
-        videoHeight: 200,
-        thisCancas: null,
-        thisContext: null,
-        thisVideo: null,
-        canvasId:'canvasCamera',
-        videoId:'videoCamera'
-      });
-    },1000)
-  } else {
-    if(state.faceOption.thisVideo != null){
-      // 不等于null 关闭摄像头
-      state.faceOption.thisVideo?.srcObject?.getTracks().forEach(track => track.stop());
-    }
-  }
-})
-
-//开始人脸识别
-const faceVerify = async () => {
-  if (state.faceImgState) return
-  if (!state.form.address) { ElMessage.warning('请等待定位成功'); return }
-  state.faceImgState = true
   try {
-    const imageBase = draw(state.faceOption)
-    const res = await request.post('/faceVerify', {imageBase}, {params: {address: state.form.address}})
-    if (res.code === '200') {
-      dialogFaceFormVisible.value = false
-      ElMessage.success('打卡成功')
-      load()
-    } else ElMessage.error(res.msg)
-  } catch { ElMessage.error('识别失败，请检查摄像头和网络后重试') }
-  finally {state.faceImgState = false}
-}
-
-//地图组件
-window._AMapSecurityConfig = {
-  securityJsCode:config.securityJsCode,
-}
-const map = shallowRef(null);//定义一个map对象
-
-//初始化地图
-let placeSearch = {}
-let geocoder; // 用于逆地理编码的变量
-const initMap=()=>{
-  AMapLoader.load({
-    key:config.key,  //设置密钥
-    version:"2.0",//版本
-    plugins:['AMap.Geolocation','AMap.PlaceSearch','AMap.Geocoder'],
-  }).then((AMap)=>{
-
-    AMap.plugin(['AMap.Geolocation'], () => {
-
-      const geolocation = new AMap.Geolocation({
-        enableHighAccuracy: true, // 是否使用高精度定位，默认:true
-        timeout: 10000,          // 超过10秒后停止定位，默认：无穷大
-        maximumAge: 0,           // 定位结果缓存0毫秒，默认：0
-        convert: true,           // 自动偏移定位结果，默认：true
-        showMarker: true,        // 定位成功显示定位点
-        showCircle: true,        // 定位成功显示精度范围圆
-        panToLocation: true,     // 定位成功后自动移动地图到定位点
-        zoomToAccuracy: true     // 定位成功后调整地图视野范围使定位位置及精度范围视野内可见
-      });
-      // 调用 getCurrentPosition 方法进行定位
-      geolocation.getCurrentPosition((status, result) => {
-        if (status === 'complete') {
-          // 定位成功，显示坐标和地址信息
-          const lnglat = result.position; // 经纬度信息
-          const addressComponent = result.addressComponent; // 地址信息
-
-          console.log('经度:', lnglat.lng);
-          console.log('纬度:', lnglat.lat);
-
-
-          map.value = new AMap.Map("container",{
-            viewMode:"3D",//地图模式
-            pitch:20,//角度
-            zoom:11,//缩放，缩放级别在3-15
-            zooms:[2,22],
-            mapStyle: 'amap://styles/blue', //设置地图的显示样式
-            center:[lnglat.lng,lnglat.lat],//初始化地图中心点位置
-          });
-
-          AMap.plugin(['AMap.Geocoder'], () => {
-            geocoder = new AMap.Geocoder({
-              radius: 1000, // 范围
-            });
-
-            // 根据经纬度进行逆地理编码
-            geocoder.getAddress([lnglat.lng, lnglat.lat], (status, result) => {
-              if (status === 'complete' && result.regeocode) {
-                // 获取城市信息
-                //const city = result.regeocode.addressComponent.city;
-                const fullAddress = result.regeocode.addressComponent.city +result.regeocode.addressComponent.district
-
-                state.form.address = fullAddress+"(经度"+lnglat.lng+",纬度:"+lnglat.lat+")"
-                state.form.longitude = lnglat.lng
-                state.form.latitude = lnglat.lat
-
-                console.log('所在地点:', state.form.address);
-                //添加地点标注
-                new AMap.Marker({
-                  position: [lnglat.lng, lnglat.lat],
-                  map: map.value,
-                  title: fullAddress,
-                });
-              } else {
-                console.log('逆地理编码失败', result);
-              }
-            });
-          });
-
-        } else {
-          // 定位失败
-          console.log('定位失败', result);
+    window._AMapSecurityConfig = {securityJsCode: config.securityJsCode}
+    const AMap = await AMapLoader.load({key: config.key, version: '2.0', plugins: ['AMap.Geolocation', 'AMap.Geocoder']})
+    if (!current()) return
+    const geolocation = new AMap.Geolocation({enableHighAccuracy: true, timeout: 10000, maximumAge: 0})
+    geolocation.getCurrentPosition((status, result) => {
+      if (!current()) return
+      if (status !== 'complete' || !result.position) {
+        locationError.value = '定位失败，请允许浏览器访问位置后重新定位。'; locating.value = false; return
+      }
+      const {lng, lat} = result.position
+      const geocoder = new AMap.Geocoder({radius: 1000})
+      geocoder.getAddress([lng, lat], (geoStatus, response) => {
+        if (!current()) return
+        locating.value = false
+        if (geoStatus !== 'complete' || !response.regeocode?.formattedAddress) {
+          locationError.value = '暂时无法获取当前位置的地址，请重新定位。'; return
         }
-      });
-    });
-  }).catch(e=>{
-    console.log(e);
-  })
+        address.value = `${response.regeocode.formattedAddress}(经度${lng},纬度${lat})`
+        map.value = new AMap.Map('checkin-map', {zoom: 15, center: [lng, lat]})
+        new AMap.Marker({position: [lng, lat], map: map.value})
+      })
+    })
+  } catch {
+    if (current()) {locationError.value = '地图服务加载失败，请检查网络和地图配置后重试。'; locating.value = false}
+  }
 }
+const faceRecord = () => {dialogFaceFormVisible.value = true}
+const prepareCheckIn = () => {camera.value?.reset(); checkIn.prepare()}
+const verifyCapture = async (images) => {
+  if (await checkIn.capture(images[0], address.value)) completeCheckIn()
+}
+const retryAttempt = async () => {if (await checkIn.submit()) completeCheckIn()}
+const completeCheckIn = () => {
+  ElMessage.success('打卡成功'); dialogFaceFormVisible.value = false; load()
+}
+watch(dialogFaceFormVisible, async open => {
+  if (open) {prepareCheckIn(); await nextTick(); if (dialogFaceFormVisible.value) locate()}
+  else {stopLocation(); checkIn.clear(); address.value = ''; load()}
+})
+onBeforeUnmount(() => {stopLocation(); checkIn.clear()})
 
 </script>
 
@@ -475,39 +323,26 @@ const initMap=()=>{
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dialogFaceFormVisible" width="40%" title="人脸识别打卡">
-      <!--捕获人脸区域-->
-      <div class="videoCamera-canvasCamera">
-        <video
-            id="videoCamera"
-            :width="videoWidth"
-            :height="videoHeight"
-            autoplay
-        ></video>
-        <canvas
-            style="display: none"
-            id="canvasCamera"
-            :width="videoWidth"
-            :height="videoHeight"
-        ></canvas>
-
-        <!--人脸特效区域-->
-        <div v-if="state.faceImgState" class="face-special-effects-2"></div>
-        <div v-else class="face-special-effects"></div>
-
-
-
+    <el-dialog v-model="dialogFaceFormVisible" width="min(720px, 94vw)" title="人脸识别打卡" top="5vh" class="face-dialog" append-to-body destroy-on-close
+               :close-on-click-modal="false" :close-on-press-escape="checkIn.phase !== 'verifying'" :show-close="checkIn.phase !== 'verifying'">
+      <div class="checkin-content">
+        <p v-if="checkIn.phase === 'preparing'" role="status">正在准备本次打卡…</p>
+        <p v-if="checkIn.phase === 'ready'" role="status">本次验证限时两分钟，请定位完成后拍照。</p>
+        <CameraCapture ref="camera" :active="dialogFaceFormVisible && ['ready', 'verifying', 'processing', 'uncertain'].includes(checkIn.phase)"
+                       :disabled="checkIn.phase !== 'ready' || !address" @captured="verifyCapture" />
+        <p v-if="checkIn.phase === 'verifying'" role="status" aria-live="polite">正在验证，请稍候…</p>
+        <el-alert v-if="checkIn.error" :title="checkIn.error" type="error" :closable="false" show-icon />
+        <el-button v-if="['uncertain', 'processing'].includes(checkIn.phase)" type="primary" @click="retryAttempt">重试本次验证</el-button>
+        <el-button v-if="checkIn.phase === 'failed'" @click="prepareCheckIn">重新准备打卡</el-button>
+        <div class="checkin-location">
+          <p v-if="locating" role="status">正在获取当前位置…</p>
+          <p v-if="address" role="status">当前位置：{{ address }}</p>
+          <el-alert v-if="locationError" :title="locationError" type="warning" :closable="false" show-icon />
+          <el-button :loading="locating" :disabled="checkIn.phase === 'verifying' || !!checkIn.attempt" @click="locate">重新定位</el-button>
+          <div id="checkin-map" class="checkin-map" :hidden="!address" aria-label="当前位置地图"></div>
+        </div>
       </div>
-
-      <div style="width: 60%;margin: 0 auto;">
-        <div style="text-align: center;">您的当前打卡的实时位置</div>
-        <div id="container" style="height: 40vh; width: 100%;margin-top: 20px;"></div>
-      </div>
-
-      <!--按钮区域-->
-      <div class="face-btn">
-        <el-button type="success" @click="faceVerify()">{{state.faceImgState?'正在识别中...':'确认识别打卡'}}</el-button>
-      </div>
+      <template #footer><el-button :disabled="checkIn.phase === 'verifying'" @click="dialogFaceFormVisible = false">关闭</el-button></template>
     </el-dialog>
 
   </div>
@@ -563,130 +398,9 @@ const initMap=()=>{
   line-height: 34px !important;
   box-sizing: border-box;
 }
-.login{
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  left: 0px;
-  top:0px;
-  background-size: cover;
-  filter: blur(10px);
-
-}
-.login-mid{
-  position: absolute;
-  width: 45%;
-  height: 65%;
-  background-color: rgba(37, 76, 102,0.5);
-  transform: translate(-50%,-50%);
-  left: 50%;
-  top: 50%;
-  cursor: pointer;
-}
-.login-mid-top,.login-mid-bot{
-  width: 100%;
-  height: 10%;
-}
-.shadow-top-left{
-  float: left;
-  width: 50px;
-  height: 100%;
-  border-top: 2px solid #00ffff;
-  border-left: 2px solid #00ffff;
-  filter: blur(2px);
-}
-.shadow-top-right{
-  float: right;
-  width: 50px;
-  height: 100%;
-  border-top: 2px solid #00ffff;
-  border-right: 2px solid #00ffff;
-  filter: blur(2px);
-}
-.shadow-bot-left{
-  float: left;
-  width: 50px;
-  height: 100%;
-  border-bottom: 2px solid #00ffff;
-  border-left: 2px solid #00ffff;
-  filter: blur(2px);
-}
-.shadow-bot-right{
-  float: right;
-  width: 50px;
-  height: 100%;
-  border-bottom: 2px solid #00ffff;
-  border-right: 2px solid #00ffff;
-  filter: blur(2px);
-}
-.login-mid-mid{
-  width: 100%;
-  height: 80%;
-}
-.login-mid:hover .shadow-top-left,
-.login-mid:hover .shadow-top-right,
-.login-mid:hover .shadow-bot-left,
-.login-mid:hover .shadow-bot-right{
-  border-color: #fff;
-  filter: blur(1px);
-}
-.videoCamera-canvasCamera{
-  position: relative;
-  width: 200px;
-  height: 200px;
-  margin: 0 auto;
-}
-.face-special-effects,.face-special-effects-2{
-  width:  300px;
-  height: 300px;
-  position: absolute;
-  z-index: 99999999999!important;
-  transform: translate(-50%,-50%);
-  top: 50%;
-  left: 50%;
-}
-.face-special-effects{
-  background: none no-repeat;
-  background-size: 300px 300px;
-}
-.face-special-effects-2{
-  background: none no-repeat;
-  background-size: 300px 300px;
-}
-.face-btn{
-  width: 100%;
-  height: 50px;
-  z-index: 999999999999!important;
-  margin-top: 45px;
-  text-align: center;
-}
-.face-btn button{
-  border: none;
-  outline: none;
-  width: 200px;
-  height: 40px;
-  border-radius: 6px;
-  color: #ffffff;
-  cursor: pointer;
-}
-.msg{
-  width: 100%;
-  height: 75px;
-  color: #ffffff;
-}
-.server-msg{
-  width: 100%;
-  height: 35px;
-  text-align: center;
-  line-height: 35px;
-}
-.welcome{
-  width: 100%;
-  height: 40px;
-  text-align: center;
-  line-height: 40px;
-  font-size: 20px;
-  font-family: "Baskerville Old Face";
-  color: white;
-}
+.checkin-content {display:grid;gap:16px;min-width:0;font-size:16px}
+.checkin-content p {margin:0;line-height:1.6;overflow-wrap:anywhere}
+.checkin-location {display:grid;gap:12px;padding-top:8px}
+.checkin-location .el-button {justify-self:start}
+.checkin-map {height:220px;width:100%}
 </style>

@@ -13,3 +13,8 @@ __pycache__/
 # 旧模板未引用的位图（包括支付二维码）保留本地，不公开。
 front/src/assets/*.png
 !.env.example
+**/.venv/
+**/.pytest_cache/
+ai-service/models/*.onnx
+ai-service/models/*.part
+ai-service/requirements-local.txt

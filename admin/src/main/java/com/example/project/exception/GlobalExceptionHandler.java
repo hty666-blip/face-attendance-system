@@ -7,12 +7,20 @@ import com.example.project.common.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public Result malformedJson(HttpMessageNotReadableException e) {
+        // Jackson 异常可携带原请求片段；人脸图片、模板和密码不进入异常日志。
+        log.warn("请求JSON格式或字段类型无效");
+        return Result.error("400", "请求格式无效，请检查输入后重试");
+    }
 
     @ExceptionHandler(DuplicateKeyException.class)
 public Result duplicateKeyException(DuplicateKeyException e) {
