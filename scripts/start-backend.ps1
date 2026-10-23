@@ -1,7 +1,19 @@
-param([switch]$BootstrapAdmin)
+param(
+    [switch]$BootstrapAdmin,
+    [string]$MavenPath = 'mvn',
+    [string]$JavaHome = $env:JAVA_HOME
+)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
+if ($JavaHome) {
+    if (-not (Test-Path -LiteralPath (Join-Path $JavaHome 'bin/java.exe'))) { throw 'JavaHome 目录无效' }
+    $env:JAVA_HOME = $JavaHome
+    $env:PATH = (Join-Path $JavaHome 'bin') + [IO.Path]::PathSeparator + $env:PATH
+}
+if (-not (Get-Command $MavenPath -ErrorAction SilentlyContinue)) {
+    throw '未找到 Maven，请使用 -MavenPath 指定 mvn.cmd 的完整路径。'
+}
 if (-not $env:DB_PASSWORD) {
     $secret = Read-Host 'MySQL 密码（仅用于当前进程）' -AsSecureString
     $env:DB_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
@@ -22,7 +34,7 @@ if ($BootstrapAdmin) {
     }
 }
 try {
-    & mvn -B -ntp -pl admin -am package -DskipTests
+    & $MavenPath -B -ntp -pl admin -am package -DskipTests
     if ($LASTEXITCODE -ne 0) { throw '构建失败' }
     & java -jar admin/target/boot.jar
 } finally {

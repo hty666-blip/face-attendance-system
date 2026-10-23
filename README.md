@@ -41,6 +41,8 @@ $env:DB_USERNAME = 'root'
 
 仅首次空库需要 `-BootstrapAdmin`，脚本会隐藏输入管理员初始密码；默认账号名 `admin`，可设置 `BOOTSTRAP_ADMIN_USERNAME`。已有管理员时禁止覆盖，之后使用不带该参数的启动命令。
 
+未配置全局 Maven 或默认 Java 版本不兼容时，可增加 `-MavenPath '<Maven目录>\bin\mvn.cmd' -JavaHome '<JDK17目录>'`。可以使用 IDE 自带的 Maven 与 JDK，脚本只设置当前 PowerShell 进程环境，不要求安装全局依赖。
+
 脚本生成本次运行的随机 JWT 签名密钥。需要重启后保留登录时，自行通过受保护环境配置持久的 `JWT_SECRET`。未使用脚本时必须显式设置它，不提供内置部署密钥。
 
 也可手动运行：
