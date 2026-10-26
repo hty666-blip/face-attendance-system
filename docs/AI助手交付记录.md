@@ -44,7 +44,7 @@ Java与Python使用独立`ASSISTANT_INTERNAL_TOKEN`及`X-Assistant-Service-Token
 | MySQL迁移 | 隔离MySQL8.4临时容器已通过新库**23表**及V002→V003→V004→V005升级。三个助手表无编造数据；运行请求编号按owner唯一；旧事件、导出及初始规则保留 |
 | 实际HTTP | **10组检查通过**：真实Java→Python显式Mock→Java服务；汇总与报表同口径、本人单日15分钟迟到/早退及敏感字段白名单、MySQL三并发同请求仅一运行一任务/异内容冲突、跨owner隔离、越权与模糊月份不执行工具、真实后台READY及三页签XLSX鉴权下载、撤权后3种历史读取入口隐藏旧统计、合成超期RUNNING保留回执不重放、停止Python后失败且日常考勤与报表仍可用。超期状态为合成故障夹具，不声称穷尽任意强杀时序 |
 | 真实页面 | Edge实际后端下完成会话查询、明确Mock、来源/数字/导出任务跳报表；1440桌面及390手机无横向溢出，页面错误为0；停止Python后显示不可用且发送禁用。一次合批验证发现同秒乱序，修正后确认通过；未重复设计检测或持续打磨 |
-| GitHub CI | 功能提交d57810c的Java、前端和Python任务均通过；数据库任务暴露独立连接执行seed时未设置时区，UTC与北京跨日导致初始规则日期早一天。已在seed自行设置+08:00，并把迁移验证固定在UTC16:30/北京次日00:30，每次连接先UTC，校验脚本自身的时区设置及日期/创建时间。修复提交的四任务状态见对应Actions记录 |
+| GitHub CI | 修复提交**9d21dce**的backend、frontend、database、face-service四任务全部成功：[Verify 40365669723](https://github.com/hty666-blip/face-attendance-system/actions/runs/40365669723)。首次功能提交d57810c三项应用任务通过，数据库任务发现seed独立连接未设时区，UTC与北京跨日导致日期早一天。已修seed自身+08:00，迁移验证固定在UTC16:30/北京次日00:30，每次连接先UTC，核对脚本自身时区及日期/创建时间 |
 
 本轮本地合计**367项测试通过**（Java151、Python178、前端38），另含迁移与真实隔离联调。本机材料位于被Git忽略的`.local/`：`assistant-mysql-migrations.log`、`assistant-java-verify.log`、`assistant-front-tests.log`、`assistant-mock-evaluation.json`、`assistant-runtime-proof.json`、`assistant-ui-*-proof.json`。专项测试最终30项通过；Python使用项目内临时目录避开本机旧系统临时目录访问限制。公开仓库只保留代码、测试与合成案例，不提交令牌、账号登录数据、人脸、实际数据库或截图。
 
