@@ -57,3 +57,8 @@ attendance:
   report:
     scheduling-enabled: ${REPORT_SCHEDULING_ENABLED:true}
     max-active-jobs: ${REPORT_MAX_ACTIVE_JOBS:3}
+assistant:
+  enabled: ${ASSISTANT_ENABLED:false}
+  url: ${ASSISTANT_URL:http://127.0.0.1:8010}
+  token: ${ASSISTANT_INTERNAL_TOKEN:}
+  provider: ${ASSISTANT_PROVIDER:openai-compatible}

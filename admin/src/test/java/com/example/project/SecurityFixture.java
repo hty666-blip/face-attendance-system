@@ -45,7 +45,7 @@ abstract class SecurityFixture {
         reset(templateMapper,userService,recordService,employees,localFace,face,attendanceClock);
         doReturn(NOW).when(attendanceClock).now();
         doReturn(NOW.toLocalDate()).when(attendanceClock).today();
-        for (String table : Arrays.asList("attendance_export_job","attendance_approval","attendance_request","attendance_day","attendance_calendar","attendance_policy","face_checkin_session","face_template","sys_role_permission","sys_permission","sys_role","employee","manager","dept","records","leaveapply","rules","notice","sys_user"))
+        for (String table : Arrays.asList("assistant_tool_call","assistant_run","assistant_conversation","attendance_export_job","attendance_approval","attendance_request","attendance_day","attendance_calendar","attendance_policy","face_checkin_session","face_template","sys_role_permission","sys_permission","sys_role","employee","manager","dept","records","leaveapply","rules","notice","sys_user"))
             db.update("DELETE FROM " + table);
         db.update("INSERT INTO sys_role(id,name,flag,deleted) VALUES(1,'admin','ADMIN',0),(2,'manager','manager',0),(3,'employee','employee',0)");
         int id=1;

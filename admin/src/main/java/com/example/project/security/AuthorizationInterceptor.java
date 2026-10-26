@@ -47,6 +47,13 @@ public class AuthorizationInterceptor implements HandlerInterceptor {
         if ("/faceVerify".equals(path) && "POST".equals(method)) {
             StpUtil.checkPermission("records.add"); return true;
         }
+        if (path.startsWith("/assistant/")) {
+            StpUtil.checkPermission("records.list");
+            if ("GET".equals(method) && (Arrays.asList("/assistant/status","/assistant/conversations","/assistant/runs/by-request").contains(path)
+                    || path.matches("/assistant/conversations/\\d+") || path.matches("/assistant/runs/[a-f0-9-]{36}"))) return true;
+            if ("POST".equals(method) && Arrays.asList("/assistant/conversations","/assistant/runs").contains(path)) return true;
+            AccessPolicy.deny();
+        }
         if (path.startsWith("/face/")) {
             if ("GET".equals(method) && ("/face/status".equals(path) || "/face/service-status".equals(path))) return true;
             if ("POST".equals(method) && "/face/challenge".equals(path)) {StpUtil.checkPermission("records.add");return true;}

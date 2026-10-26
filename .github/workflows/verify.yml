@@ -16,7 +16,7 @@ jobs:
           --health-retries=30
     steps:
       - uses: actions/checkout@v4
-      - name: Verify clean schema and V003-V004 upgrade
+      - name: Verify clean schema and V003-V005 upgrade
         env:
           MYSQL_TEST_CONTAINER: ${{ job.services.mysql.id }}
         run: bash database/tests/verify-migrations.sh "$MYSQL_TEST_CONTAINER"
@@ -58,4 +58,5 @@ jobs:
           cache: pip
           cache-dependency-path: ai-service/requirements.txt
       - run: python -m pip install -r requirements.txt
+      - run: python -m pip check
       - run: python -m pytest -q

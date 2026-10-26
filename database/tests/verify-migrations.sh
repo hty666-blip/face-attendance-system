@@ -41,7 +41,7 @@ mysql_in -e 'CREATE DATABASE attendance_verify CHARACTER SET utf8mb4; CREATE DAT
 
 mysql_in attendance_verify < "$root_dir/database/schema.sql"
 mysql_in attendance_verify < "$root_dir/database/seed.sql"
-assert_eq 'new schema has 20 tables' 20 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_verify'")"
+assert_eq 'new schema has 23 tables' 23 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_verify'")"
 assert_eq 'new schema contains no accounts' 0 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM sys_user')"
 assert_eq 'new schema contains no attendance events' 0 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM records')"
 assert_eq 'new initial policy uses Shanghai date and 08-18 shift' 1 "$(mysql_in attendance_verify -e "SET time_zone='+08:00'; SELECT COUNT(*) FROM attendance_policy WHERE effective_from=CURRENT_DATE() AND start_time='08:00:00' AND end_time='18:00:00' AND grace_minutes=0")"
@@ -84,4 +84,14 @@ for db in attendance_verify attendance_upgrade_verify; do
 done
 assert_eq 'V004 preserves legacy event and new action fields' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM records WHERE id=90001 AND address='synthetic migration address' AND business_date IS NULL AND action IS NULL")"
 assert_eq 'V004 preserves initial policy' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM attendance_policy WHERE start_time='08:00:00' AND end_time='18:00:00'")"
-echo 'MySQL 8.4 new-schema and V002-to-V003-to-V004 migration checks passed.'
+mysql_in attendance_upgrade_verify < "$root_dir/database/migrations/V005__assistant.sql"
+assert_eq 'V005 upgraded schema has 23 tables' 23 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_upgrade_verify'")"
+for db in attendance_verify attendance_upgrade_verify; do
+  for table in assistant_conversation assistant_run assistant_tool_call; do
+    assert_eq "$db starts with no invented $table data" 0 "$(mysql_in "$db" -e "SELECT COUNT(*) FROM $table")"
+  done
+  assert_eq "$db assistant run request is unique per owner" 1 "$(mysql_in -e "SELECT COUNT(*) FROM (SELECT index_name FROM information_schema.statistics WHERE table_schema='$db' AND table_name='assistant_run' AND non_unique=0 GROUP BY index_name HAVING GROUP_CONCAT(column_name ORDER BY seq_in_index)='owner_id,request_key') AS owner_request_indexes")"
+  assert_eq "$db preserves prior export metadata" 2 "$(mysql_in "$db" -e "SELECT COUNT(*) FROM attendance_export_job WHERE request_key='synthetic-migration-export-key' AND state='CANCELLED'")"
+done
+assert_eq 'V005 preserves legacy events' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM records WHERE id=90001 AND business_date IS NULL AND action IS NULL")"
+echo 'MySQL 8.4 new-schema and V002-to-V005 migration checks passed.'

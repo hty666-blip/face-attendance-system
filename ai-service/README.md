@@ -1,6 +1,6 @@
-# 本地人脸计算服务
+# 本地人脸计算与AI计划服务
 
-该进程只负责图片检查、YuNet 单脸检测和 SFace 特征计算。Java 负责登录、人员权限、模板加密、打卡会话和考勤写入。Python 不连接业务数据库，不保存照片，不决定考勤是否成功，也不接受浏览器直接调用。
+该进程负责人脸图片检查、YuNet 单脸检测、SFace 特征计算，以及独立的 LangChain 考勤工具计划。Java 负责登录、人员权限、业务事务和工具执行。Python 不连接业务数据库，不保存照片，不决定考勤是否成功，也不接受浏览器直接调用。
 
 ## 环境与启动
 
@@ -54,6 +54,38 @@ python -m venv .venv
 单元测试不下载模型，也不使用真人样本，覆盖鉴权、请求大小、格式与安全错误、模型失效、并发忙碌、单脸/光线/清晰度、模板维度与有限值。smoke 使用真实模型校验特征提取、同图比对和空白图片拒绝，仅证明推理链路可运行。它不能替代不同图片的本人/非本人准确率、活体能力或真实摄像头验收。
 
 2026-10-23 本地验证：72 项单元测试通过。真实模型在项目的 Windows 中文路径下完成 128 维特征提取、同图余弦相似度 1.0、空白图片拒绝，以及携带 token 的录入/比较接口调用。兼容现有 `httpx` 的测试客户端会报告一条弃用提示，不影响当前测试。使用的公开样本来自 [OpenCV 4.13.0 测试数据](https://github.com/opencv/opencv/blob/4.13.0/samples/data/lena.jpg)，图片和具体结果只保留在本机 `.local/`，没有加入版本库。模型通过 Python 读取并经内存传入 OpenCV，避免 Windows 中文目录的模型文件读取问题。
+
+## AI考勤计划接口
+
+聊天与人脸使用独立认证与并发预算。`GET /assistant/health`、`POST /assistant/v1/plan` 均要求 `X-Assistant-Service-Token`，对应环境变量 `ASSISTANT_INTERNAL_TOKEN`，至少32个ASCII字符。人脸模型缺失不会阻止已配置的聊天，模型故障也不影响人脸接口。
+
+默认 `ASSISTANT_ENABLED=false`，不会调用模型。启用后须明确选择 `ASSISTANT_PROVIDER=mock` 或 `openai-compatible`。Mock为中文规则演示，响应始终标记 `MOCK`；真实模式还需要管理员明确提供 `ASSISTANT_API_KEY`、`ASSISTANT_MODEL`。可选 `ASSISTANT_BASE_URL` 仅来自进程配置，允许HTTPS或本机HTTP，不接受请求动态指定的URL。真实模式配置缺失或调用失败不会退回Mock，不会自动开通付费服务。
+
+`ASSISTANT_TIMEOUT_SECONDS` 默认15秒，环境配置限0.05～30秒；`ASSISTANT_MAX_CONCURRENCY` 默认2，限1～4，超额立即429。JSON正文在读取和解析前鉴权，累计上限200KiB（包括分块传输和伪造长度）。固定错误码区分未配置、繁忙、模型超时、不可用和格式错误，错误不会包含正文、密钥或原始SDK响应。
+
+契约为 `assistant-plan-v1`，请求含 `message`、服务端北京时间 `today`、最多50个部门选项、6条历史、5个业务回执及 `allowExport`。详情以 [AI助手设计](../docs/AI助手设计.md) 为准。每次最多返回一个严格工具建议：
+
+| 工具 | 参数 |
+|---|---|
+| `query_attendance_summary` | `month: yyyy-MM`、`scope: SELF/DEPARTMENT`、`deptId: null/正整数` |
+| `explain_attendance_day` | `date: yyyy-MM-dd`，仅本人 |
+| `create_attendance_export` | 同月度查询参数，须有导出权限且本轮尚未创建导出 |
+| `get_export_status` | `jobId: 正整数`，Java再校验任务所有者 |
+
+Python使用 LangChain Core 消息与 `ChatOpenAI.bind_tools`，关闭并行工具和自动重试，禁止额外身份字段、未知工具、重复工具和超出部门选项的建议。Java每次执行仍需重新鉴权、检查时间预算和幂等；Python不执行工具、SQL、文件操作或HTTP回调。摘要数字与执行成功状态由Java按回执生成。模型等待可取消，超时后不返回工具供Java执行。
+
+LangSmith是LangChain Core的传递依赖，运行时显式用 `tracing_context(enabled=False)` 关闭追踪，环境误配追踪开关也不发送外部追踪。不会记录用户正文、模型原文、令牌或Key。依赖在2026-10-26核对官方PyPI后安装并锁定：`langchain-core==1.7.0`、`langchain-openai==1.7.2`、`openai==3.37.0`，保留原人脸依赖版本。未安装LangGraph或另建业务服务。
+
+固定评测夹具为 `tests/fixtures/assistant_cases.json`，30个development与30个holdout，覆盖明确月份/范围、澄清、部门重名、越权、提示注入、导出权限、日期边界和任务编号。Mock测试只能证明规则与契约回归。真实模型必须配置后单独运行，不得把Mock通过率、Mock时延或合成SDK输出当成真实模型效果。
+
+```powershell
+# 默认仅演示规则，不调用真实模型
+& ./.venv/Scripts/python.exe scripts/evaluate_assistant.py --provider mock --split all --output ../.local/assistant-mock-evaluation.json
+# 仅在已配置真实模型并明确接受费用时人工执行，默认不运行
+& ./.venv/Scripts/python.exe scripts/evaluate_assistant.py --provider model --split holdout --allow-paid-model --output ../.local/assistant-model-holdout.json
+```
+
+评测报告仅允许输出到项目 `.local/`，不含原始模型文本。真实模式仍须核查工具完成情况、澄清合理性、端到端权限与导出结果；固定案例计划选择不等于生产准确率。本轮没有真实模型凭据，也没有真实模型完成率、费用或时延结论。
 
 ## 模型来源与许可
 

@@ -276,3 +276,7 @@ CREATE TABLE IF NOT EXISTS attendance_export_job (
   KEY ix_attendance_export_owner (owner_id,id),
   KEY ix_attendance_export_expiry (state,expires_at)
 );
+
+CREATE TABLE IF NOT EXISTS assistant_conversation(id bigint AUTO_INCREMENT PRIMARY KEY,owner_id int NOT NULL,title varchar(100) NOT NULL,created_at timestamp NOT NULL,updated_at timestamp NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_run(id varchar(36) PRIMARY KEY,conversation_id bigint NOT NULL,turn_index bigint NOT NULL,owner_id int NOT NULL,request_key varchar(64) NOT NULL,request_hash varchar(64) NOT NULL,message varchar(2000) NOT NULL,answer text,state varchar(20) NOT NULL,mode varchar(10) NOT NULL,error_code varchar(50),created_at timestamp NOT NULL,finished_at timestamp,deadline_at timestamp NOT NULL,UNIQUE(owner_id,request_key),UNIQUE(conversation_id,turn_index));
+CREATE TABLE IF NOT EXISTS assistant_tool_call(id bigint AUTO_INCREMENT PRIMARY KEY,run_id varchar(36) NOT NULL,call_order int NOT NULL,tool_name varchar(80) NOT NULL,arguments_json text NOT NULL,state varchar(20) NOT NULL,result_json text,error_code varchar(50),created_at timestamp NOT NULL,UNIQUE(run_id,call_order));

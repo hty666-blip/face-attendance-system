@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.types import ASGIApp, Receive, Scope, Send
 import cv2
 from .engine import FaceEngine, FaceError, MODEL_VERSION
+from .assistant import AssistantConfig, MAX_ASSISTANT_BODY, install_assistant
 
 log = logging.getLogger('face-service')
 MAX_BODY_BYTES = 22_000_000
@@ -21,14 +22,23 @@ Embedding = Annotated[list[FiniteFloat], Field(min_length=128, max_length=128)]
 
 class BoundedBodyMiddleware:
     """在 JSON 解析之前限制累计体积，同时支持没有 Content-Length 的传输。"""
-    def __init__(self, app: ASGIApp, service_token: str, max_bytes: int = MAX_BODY_BYTES):
+    def __init__(self, app: ASGIApp, service_token: str, max_bytes: int = MAX_BODY_BYTES, assistant_token: str = ''):
         self.app, self.service_token, self.max_bytes = app, service_token, max_bytes
+        self.assistant_token = assistant_token
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        if scope['type'] != 'http' or scope['method'] != 'POST':
+        if scope['type'] != 'http':
             await self.app(scope, receive, send)
             return
         headers = dict(scope['headers'])
+        assistant = scope['path'].startswith('/assistant/')
+        if assistant and not valid_token(headers.get(b'x-assistant-service-token', b''), self.assistant_token):
+            await JSONResponse(status_code=401, content={'code': 'UNAUTHORIZED', 'msg': '内部服务鉴权失败'})(scope, receive, send)
+            return
+        if scope['method'] != 'POST':
+            await self.app(scope, receive, send)
+            return
+        body_limit = MAX_ASSISTANT_BODY if assistant else self.max_bytes
         # 内部接口先鉴权，未授权调用不会触发图片读取、JSON 解析和推理。
         if scope['path'].startswith('/v1/') and not valid_token(
             headers.get(b'x-face-service-token', b''), self.service_token
@@ -43,19 +53,19 @@ class BoundedBodyMiddleware:
             await JSONResponse(status_code=400, content={'code': 'INVALID_REQUEST', 'msg': '请求格式不正确'})(scope, receive, send)
             return
         chunks, count = [], 0
-        if declared <= self.max_bytes:
+        if declared <= body_limit:
             while True:
                 message = await receive()
                 if message['type'] == 'http.disconnect':
                     return
                 count += len(message.get('body', b''))
-                if count > self.max_bytes:
+                if count > body_limit:
                     break
                 chunks.append(message)
                 if not message.get('more_body', False):
                     break
-        if declared > self.max_bytes or count > self.max_bytes:
-            await JSONResponse(status_code=413, content={'code': 'BODY_TOO_LARGE', 'msg': '图片请求过大'})(scope, receive, send)
+        if declared > body_limit or count > body_limit:
+            await JSONResponse(status_code=413, content={'code': 'BODY_TOO_LARGE', 'msg': '助手请求过大' if assistant else '图片请求过大'})(scope, receive, send)
             return
         # 已验证的有限数据再交给框架，避免框架把读取异常改写成 400。
         messages = iter(chunks)
@@ -77,8 +87,9 @@ class CompareRequest(BaseModel):
     modelVersion: str = Field(max_length=100)
     embeddings: list[Embedding] = Field(min_length=1, max_length=3)
 
-def create_app(engine=None, token=None):
+def create_app(engine=None, token=None, assistant_config=None, assistant_planner=None):
     service_token = token if token is not None else os.environ.get('FACE_INTERNAL_TOKEN', '')
+    assistant_config = assistant_config if assistant_config is not None else AssistantConfig.from_env()
     gate = threading.Lock()
 
     @asynccontextmanager
@@ -97,7 +108,8 @@ def create_app(engine=None, token=None):
 
     app = FastAPI(title='Local face computation', lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
-    app.add_middleware(BoundedBodyMiddleware, service_token=service_token)
+    app.add_middleware(BoundedBodyMiddleware, service_token=service_token, assistant_token=assistant_config.token)
+    install_assistant(app, assistant_config, valid_token, assistant_planner)
 
     @app.exception_handler(FaceError)
     async def face_error(request, error):

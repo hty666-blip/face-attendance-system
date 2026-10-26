@@ -5,6 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'face-common.ps1')
+. (Join-Path $PSScriptRoot 'assistant-common.ps1')
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 if ($JavaHome) {
@@ -17,7 +18,9 @@ if (-not (Get-Command $MavenPath -ErrorAction SilentlyContinue)) {
 }
 $previousFaceKey = $env:FACE_TEMPLATE_KEY
 $previousFaceToken = $env:FACE_INTERNAL_TOKEN
+$previousAssistantToken = $env:ASSISTANT_INTERNAL_TOKEN
 try {
+    if ($env:ASSISTANT_ENABLED -eq 'true') { $env:ASSISTANT_INTERNAL_TOKEN = (Read-AssistantSettings -RequireToken).ASSISTANT_INTERNAL_TOKEN }
     if ($env:FACE_ENABLED -ne 'false') {
         $requireLocalToken = -not $env:FACE_PROVIDER -or $env:FACE_PROVIDER -eq 'local'
         $faceSecrets = Read-FaceSecrets -RequireTemplateKey -RequireToken:$requireLocalToken
@@ -49,6 +52,7 @@ try {
 } finally {
     $env:FACE_TEMPLATE_KEY = $previousFaceKey
     $env:FACE_INTERNAL_TOKEN = $previousFaceToken
+    $env:ASSISTANT_INTERNAL_TOKEN = $previousAssistantToken
     Remove-Item Env:BOOTSTRAP_ADMIN_PASSWORD -ErrorAction SilentlyContinue
     Remove-Item Env:BOOTSTRAP_ADMIN_ENABLED -ErrorAction SilentlyContinue
 }

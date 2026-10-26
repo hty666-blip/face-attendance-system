@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'face-common.ps1')
+. (Join-Path $PSScriptRoot 'assistant-common.ps1')
 $serviceRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'ai-service'
 $venvPython = Join-Path $serviceRoot '.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $venvPython)) {
@@ -8,7 +9,9 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 Test-FacePython -PythonPath $venvPython
 $secrets = Read-FaceSecrets -RequireToken
 $previousToken = $env:FACE_INTERNAL_TOKEN
+$previousAssistantToken = $env:ASSISTANT_INTERNAL_TOKEN
 $env:FACE_INTERNAL_TOKEN = $secrets.FACE_INTERNAL_TOKEN
+if ($env:ASSISTANT_ENABLED -eq 'true') { $env:ASSISTANT_INTERNAL_TOKEN = (Read-AssistantSettings -RequireToken).ASSISTANT_INTERNAL_TOKEN }
 Push-Location -LiteralPath $serviceRoot
 try {
     Write-Host '本地人脸服务：http://127.0.0.1:8010，健康检查 /health。按 Ctrl+C 结束。'
@@ -16,5 +19,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '本地人脸服务已异常退出，请检查依赖、端口和模型文件。' }
 } finally {
     $env:FACE_INTERNAL_TOKEN = $previousToken
+    $env:ASSISTANT_INTERNAL_TOKEN = $previousAssistantToken
     Pop-Location
 }
