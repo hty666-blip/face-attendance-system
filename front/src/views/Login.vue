@@ -39,7 +39,6 @@ const rules = reactive({
   ],
   password: [
     {required: true, message: '请输入密码', trigger: 'blur'},
-    {min: 3, max: 20, message: '密码长度在3-20位之间', trigger: 'blur'},
   ],
 })
 const ruleFormRef = ref()
