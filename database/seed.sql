@@ -1,4 +1,6 @@
 -- 新库基础角色、菜单、图标与班次；不含账号或实际考勤数据。
+-- schema与seed可能由独立连接执行，业务日期不能继承前一会话的时区。
+SET time_zone = '+08:00';
 insert  into `dict`(`id`,`code`,`value`,`type`,`deleted`) values
 (2,'message','message','icon',0),
 (3,'menu','menu','icon',0),

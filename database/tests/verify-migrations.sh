@@ -23,7 +23,7 @@ mysql_in() {
     : "${MYSQL_ROOT_PASSWORD:?Test container requires MYSQL_ROOT_PASSWORD}"
     export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
     exec mysql --protocol=tcp -h127.0.0.1 --connect-timeout=5 --default-character-set=utf8mb4 --batch --skip-column-names -uroot "$@"
-  ' sh "$@"
+  ' sh --init-command="SET time_zone='+00:00', timestamp=1793032200" "$@"
 }
 assert_eq() {
   if [[ "$2" != "$3" ]]; then
@@ -33,6 +33,8 @@ assert_eq() {
   printf 'PASS: %s\n' "$1"
 }
 
+# 固定UTC 2026-10-26 16:30（北京次日00:30），每次连接先UTC；被测脚本须自行切业务时区。
+assert_eq 'test clock starts before UTC midnight' '2026-10-26 16:30:00' "$(mysql_in -e 'SELECT NOW()')"
 for db in attendance_verify attendance_upgrade_verify; do
   assert_eq "target database $db does not exist" 0 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='$db'")"
 done
@@ -44,7 +46,7 @@ mysql_in attendance_verify < "$root_dir/database/seed.sql"
 assert_eq 'new schema has 23 tables' 23 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_verify'")"
 assert_eq 'new schema contains no accounts' 0 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM sys_user')"
 assert_eq 'new schema contains no attendance events' 0 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM records')"
-assert_eq 'new initial policy uses Shanghai date and 08-18 shift' 1 "$(mysql_in attendance_verify -e "SET time_zone='+08:00'; SELECT COUNT(*) FROM attendance_policy WHERE effective_from=CURRENT_DATE() AND start_time='08:00:00' AND end_time='18:00:00' AND grace_minutes=0")"
+assert_eq 'new initial policy uses next-day Shanghai date and 08-18 shift' 1 "$(mysql_in attendance_verify -e "SELECT COUNT(*) FROM attendance_policy WHERE effective_from='2026-10-27' AND created_at='2026-10-27 00:30:00' AND start_time='08:00:00' AND end_time='18:00:00' AND grace_minutes=0")"
 
 mysql_in attendance_upgrade_verify < "$root_dir/database/tests/v002_schema.sql"
 mysql_in attendance_upgrade_verify < "$root_dir/database/tests/v002_seed.sql"
@@ -57,7 +59,7 @@ assert_eq 'no invented dated requests' 0 "$(mysql_in attendance_upgrade_verify -
 assert_eq 'no invented day snapshots' 0 "$(mysql_in attendance_upgrade_verify -e 'SELECT COUNT(*) FROM attendance_day')"
 assert_eq 'old pending and processing sessions invalidated' 2 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM face_checkin_session WHERE id IN ('synthetic-pending','synthetic-processing') AND state='INVALIDATED' AND action IS NULL AND business_date IS NULL")"
 assert_eq 'successful old session preserved' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM face_checkin_session WHERE id='synthetic-succeeded' AND state='SUCCEEDED' AND record_id=90001")"
-assert_eq 'upgraded policy copies original shift on Shanghai date' 1 "$(mysql_in attendance_upgrade_verify -e "SET time_zone='+08:00'; SELECT COUNT(*) FROM attendance_policy WHERE effective_from=CURRENT_DATE() AND start_time='08:00:00' AND end_time='18:00:00' AND created_by=0")"
+assert_eq 'upgraded policy copies original shift on next-day Shanghai date' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM attendance_policy WHERE effective_from='2026-10-27' AND created_at='2026-10-27 00:30:00' AND start_time='08:00:00' AND end_time='18:00:00' AND created_by=0")"
 for db in attendance_verify attendance_upgrade_verify; do
   assert_eq "$db grants built-in manager correction review once" 1 "$(mysql_in "$db" -e "SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_role r ON r.id=rp.role_id JOIN sys_permission p ON p.id=rp.permission_id WHERE r.flag='manager' AND r.deleted=0 AND p.auth='records.edit' AND p.deleted=0 AND p.name='补卡申请审批'")"
   assert_eq "$db has six event fact columns" 6 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$db' AND table_name='records' AND column_name IN ('business_date','action','occurred_at','source','dept_id','request_id')")"
