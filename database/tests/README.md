@@ -10,4 +10,4 @@ bash database/tests/verify-migrations.sh <独立临时MySQL容器名或ID>
 
 需要 Bash、Docker CLI 及已启动的 `mysql:8.4` 临时容器。脚本从容器现有环境读取 `MYSQL_ROOT_PASSWORD`，不在宿主机命令行传密码。只会新建 `attendance_verify`、`attendance_upgrade_verify` 两个固定库；任一已存在就拒绝，不删除或覆盖数据库、不启动或停止容器。失败后不要在同一容器重复执行，应由调用方清理该测试容器并新建独立容器。绝不对原库、共用数据库服务或生产容器执行。
 
-覆盖新库结构与种子、V002→V003 升级、旧事件/自由时长请假保留、不猜测日期动作、旧未完成会话失效、初始规则日期/时间、内置主管审批授权及 MySQL 每日动作唯一约束。GitHub Actions 为其单独启动临时 MySQL 8.4 service，测试后自动清理，不挂载业务数据。
+覆盖新库结构与种子、V002→V003→V004 升级、旧事件/自由时长请假保留、不猜测日期动作、旧未完成会话失效、初始规则日期/时间、内置主管审批授权、MySQL 每日动作唯一约束、空导出任务表及内置员工/主管的受限导出授权。GitHub Actions 为其单独启动临时 MySQL 8.4 service，测试后自动清理，不挂载业务数据。

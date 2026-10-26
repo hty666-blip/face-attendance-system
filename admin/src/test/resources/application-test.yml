@@ -1,7 +1,7 @@
 spring:
   datasource:
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:foundation;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:foundation;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;NON_KEYWORDS=MONTH
     username: sa
     password:
   sql:
@@ -15,3 +15,7 @@ app:
   registration-enabled: false
 file:
   storage-path: ./target/test-files
+attendance:
+  report:
+    scheduling-enabled: false
+    max-active-jobs: 3

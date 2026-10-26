@@ -58,12 +58,25 @@ public class AttendanceService {
                         .or(l -> l.eq("kind","LEAVE").le("start_date",date).ge("end_date",date))));
     }
     private AttendanceDay snapshot(Integer userId,LocalDate date,List<Records> records,List<AttendanceRequest> requests) {
+        return snapshot(userId,date,records,requests,false);
+    }
+    private AttendanceDay snapshot(Integer userId,LocalDate date,List<Records> records,List<AttendanceRequest> requests,boolean previewOnly) {
+        return snapshot(userId,date,records,requests,previewOnly,clock.today());
+    }
+    private AttendanceDay snapshot(Integer userId,LocalDate date,List<Records> records,List<AttendanceRequest> requests,boolean previewOnly,LocalDate referenceDate) {
         int historicalDepartment=0;
-        if(!date.isBefore(clock.today())) historicalDepartment=departmentOf(userId);
+        if(!date.isBefore(referenceDate)) historicalDepartment=departmentOf(userId);
         else if(!records.isEmpty()) historicalDepartment=records.get(0).getDeptId()==null?0:records.get(0).getDeptId();
         else if(!requests.isEmpty()) historicalDepartment=requests.get(0).getDeptId()==null?0:requests.get(0).getDeptId();
         // 无历史事实时保留0未知，不能用调岗后的部门猜测旧日归属。
-        return policies.dayPolicy(userId,date,historicalDepartment);
+        if(!previewOnly) return policies.dayPolicy(userId,date,historicalDepartment);
+        AttendanceDay saved=days.selectOne(new QueryWrapper<AttendanceDay>().eq("user_id",userId).eq("business_date",date));
+        if(saved!=null) return saved;
+        AttendancePolicy policy=policies.effective(date);if(policy==null) return null;
+        AttendancePolicyService.validateTimes(policy.getStartTime(),policy.getEndTime(),policy.getGraceMinutes());
+        AttendanceDay temporary=new AttendanceDay();temporary.setUserId(userId);temporary.setBusinessDate(date);temporary.setDeptId(historicalDepartment);
+        temporary.setPolicyId(policy.getId());temporary.setStartTime(policy.getStartTime());temporary.setEndTime(policy.getEndTime());
+        temporary.setGraceMinutes(policy.getGraceMinutes());temporary.setWorkingDay(policies.workingDay(date));return temporary;
     }
     private boolean leaveHalf(List<AttendanceRequest> facts,LocalDate date,String half) {
         long target=halfIndex(date,half);
@@ -161,11 +174,16 @@ public class AttendanceService {
         result.put("actions",actions);return result;
     }
     public Map<String,Object> day(Integer userId,LocalDate date) {
-        access.requireUser(userId);
+        return day(SessionUtils.getUser(),userId,date,null,false,clock.today());
+    }
+    private Map<String,Object> day(User actor,Integer userId,LocalDate date,Integer requiredDepartment,boolean reportPreview,LocalDate referenceDate) {
+        access.requireUser(actor,userId);
         List<Records> records=events(userId,date);List<AttendanceRequest> facts=facts(userId,date);
-        AttendanceDay policy=date.isBefore(eligibleFrom(userId))?null:snapshot(userId,date,records,facts);
+        AttendanceDay policy=date.isBefore(eligibleFrom(userId))?null:snapshot(userId,date,records,facts,reportPreview,referenceDate);
         Map<String,Object> result=new LinkedHashMap<>();result.put("businessDate",date);
-        if(!visibleDay(userId,date,policy,records,facts)) {result.put("status","RESTRICTED");return result;}
+        boolean visible=requiredDepartment==null?visibleDay(actor,userId,policy,records,facts):belongsToDepartment(requiredDepartment,policy,records,facts);
+        if(reportPreview) result.put("_accessEvidence",departmentEvidence(policy,records,facts)+"|"+visible);
+        if(!visible) {result.put("status","RESTRICTED");return result;}
         Records in=null,out=null;for(Records row:records){if("IN".equals(row.getAction())) in=row;if("OUT".equals(row.getAction())) out=row;}
         result.put("workingDay",policy!=null && Boolean.TRUE.equals(policy.getWorkingDay()));result.put("policyId",policy==null?null:policy.getPolicyId());
         result.put("startTime",policy==null?null:policy.getStartTime());result.put("endTime",policy==null?null:policy.getEndTime());
@@ -173,40 +191,73 @@ public class AttendanceService {
         boolean working=policy!=null && Boolean.TRUE.equals(policy.getWorkingDay());
         boolean am=working && leaveHalf(facts,date,"AM"),pm=working && leaveHalf(facts,date,"PM");
         long late=working && !am && in!=null?lateMinutes(policy,in.getOccurredAt()):0,early=working && !pm && out!=null?earlyMinutes(policy,out.getOccurredAt()):0;
-        boolean missingIn=working && date.isBefore(clock.today()) && !am && in==null,missingOut=working && date.isBefore(clock.today()) && !pm && out==null;
+        boolean missingIn=working && date.isBefore(referenceDate) && !am && in==null,missingOut=working && date.isBefore(referenceDate) && !pm && out==null;
         result.put("lateMinutes",late);result.put("earlyMinutes",early);result.put("missingIn",missingIn);result.put("missingOut",missingOut);
         result.put("leaveDays",(am?0.5:0)+(pm?0.5:0));result.put("pendingCount",facts.stream().filter(row -> "PENDING".equals(row.getState())).count());
         String status;
         if(policy==null) status="LEGACY";
         else if(!working) status="REST";
-        else if(date.isAfter(clock.today())) status="UPCOMING";
+        else if(date.isAfter(referenceDate)) status="UPCOMING";
         else if(am && pm) status="LEAVE";
         else if(missingIn || missingOut) status="MISSING";
-        else if(date.equals(clock.today()) && ((!am && in==null) || (!pm && out==null))) status="IN_PROGRESS";
+        else if(date.equals(referenceDate) && ((!am && in==null) || (!pm && out==null))) status="IN_PROGRESS";
         else if(late>0 && early>0) status="LATE_AND_EARLY";
         else if(late>0) status="LATE";
         else if(early>0) status="EARLY";
         else status="NORMAL";
         result.put("status",status);return result;
     }
-    private boolean visibleDay(Integer userId,LocalDate date,AttendanceDay day,List<Records> records,List<AttendanceRequest> facts) {
-        User actor=SessionUtils.getUser();if("ADMIN".equals(actor.getRole()) || userId.equals(actor.getId())) return true;
+    private boolean visibleDay(User actor,Integer userId,AttendanceDay day,List<Records> records,List<AttendanceRequest> facts) {
+        if("ADMIN".equals(actor.getRole()) || userId.equals(actor.getId())) return true;
         if(!"manager".equals(actor.getRole()) || day==null) return false;
         Set<Integer> known=new HashSet<>();if(day.getDeptId()!=null && day.getDeptId()>0) known.add(day.getDeptId());
         for(Records event:records) {if(event.getDeptId()==null || event.getDeptId()==0) return false;known.add(event.getDeptId());}
         for(AttendanceRequest request:facts) {if(request.getDeptId()==null || request.getDeptId()==0) return false;known.add(request.getDeptId());}
-        if(known.isEmpty()) return false;return access.departmentIds().containsAll(known);
+        if(known.isEmpty()) return false;return access.departmentIds(actor).containsAll(known);
+    }
+    /** 部门报表即使由管理员生成，也不能包含其他部门或未知归属的历史事实。 */
+    private boolean belongsToDepartment(Integer department,AttendanceDay day,List<Records> records,List<AttendanceRequest> facts) {
+        if(day==null || !department.equals(day.getDeptId())) return false;
+        for(Records event:records) if(!department.equals(event.getDeptId())) return false;
+        for(AttendanceRequest request:facts) if(!department.equals(request.getDeptId())) return false;
+        return true;
+    }
+    private String departmentEvidence(AttendanceDay day,List<Records> records,List<AttendanceRequest> facts) {
+        Set<Integer> departments=new TreeSet<>();
+        if(day!=null) departments.add(day.getDeptId()==null?0:day.getDeptId());
+        for(Records event:records) departments.add(event.getDeptId()==null?0:event.getDeptId());
+        for(AttendanceRequest request:facts) departments.add(request.getDeptId()==null?0:request.getDeptId());
+        return (day==null?"NO_POLICY":"POLICY")+departments.toString();
     }
     public Map<String,Object> month(String month,Integer requestedUser) {
-        YearMonth selected=AttendancePolicyService.parseMonth(month);Integer target=requestedUser==null?SessionUtils.getUser().getId():requestedUser;
-        access.requireUser(target);
+        return month(SessionUtils.getUser(),month,requestedUser,null,false,clock.today());
+    }
+    /** 仅供服务端报表调用；显式身份必须由调用者从数据库重载，不能映射浏览器请求体。 */
+    public Map<String,Object> reportMonth(User actor,String month,Integer requestedUser,Integer requiredDepartment) {
+        return reportMonth(actor,month,requestedUser,requiredDepartment,clock.today());
+    }
+    public Map<String,Object> reportMonth(User actor,String month,Integer requestedUser,Integer requiredDepartment,LocalDate referenceDate) {
+        return month(actor,month,requestedUser,requiredDepartment,true,referenceDate);
+    }
+    private Map<String,Object> month(User actor,String month,Integer requestedUser,Integer requiredDepartment,boolean reportPreview,LocalDate referenceDate) {
+        YearMonth selected=AttendancePolicyService.parseMonth(month);Integer target=requestedUser==null?actor.getId():requestedUser;
+        access.requireUser(actor,target);
         if(users.selectById(target)==null) throw invalid("用户不存在或已停用");
-        List<Map<String,Object>> result=new ArrayList<>();Map<String,Object> stats=new LinkedHashMap<>();
+        List<Map<String,Object>> result=new ArrayList<>();
+        for(int number=1;number<=selected.lengthOfMonth();number++) result.add(day(actor,target,selected.atDay(number),requiredDepartment,reportPreview,referenceDate));
+        Map<String,Object> response=new LinkedHashMap<>();response.put("month",selected.toString());response.put("userId",target);response.put("days",result);
+        response.put("statistics",statistics(result,referenceDate));return response;
+    }
+    /** 原月度工作台和报表中心唯一的统计口径。 */
+    public Map<String,Object> statistics(List<Map<String,Object>> result) {
+        return statistics(result,clock.today());
+    }
+    public Map<String,Object> statistics(List<Map<String,Object>> result,LocalDate referenceDate) {
+        Map<String,Object> stats=new LinkedHashMap<>();
         int working=0,elapsed=0,normal=0,lateDays=0,earlyDays=0,missing=0,restricted=0;double leave=0;long late=0,early=0;
-        for(int number=1;number<=selected.lengthOfMonth();number++) {
-            Map<String,Object> item=day(target,selected.atDay(number));result.add(item);
+        for(Map<String,Object> item:result) {
             if("RESTRICTED".equals(item.get("status"))) {restricted++;continue;}
-            if(Boolean.TRUE.equals(item.get("workingDay"))) {working++;if(!selected.atDay(number).isAfter(clock.today())) elapsed++;}
+            if(Boolean.TRUE.equals(item.get("workingDay"))) {working++;if(!((LocalDate)item.get("businessDate")).isAfter(referenceDate)) elapsed++;}
             if("NORMAL".equals(item.get("status"))) normal++;
             long dayLate=((Number)item.get("lateMinutes")).longValue(),dayEarly=((Number)item.get("earlyMinutes")).longValue();
             if(dayLate>0) lateDays++;if(dayEarly>0) earlyDays++;if("MISSING".equals(item.get("status"))) missing++;
@@ -214,7 +265,7 @@ public class AttendanceService {
         }
         stats.put("workingDays",working);stats.put("elapsedWorkingDays",elapsed);stats.put("normalDays",normal);stats.put("lateDays",lateDays);stats.put("earlyDays",earlyDays);
         stats.put("missingDays",missing);stats.put("leaveDays",leave);stats.put("lateMinutes",late);stats.put("earlyMinutes",early);stats.put("restrictedDays",restricted);
-        Map<String,Object> response=new LinkedHashMap<>();response.put("month",selected.toString());response.put("userId",target);response.put("days",result);response.put("statistics",stats);return response;
+        return stats;
     }
     private long lateMinutes(AttendanceDay day,LocalDateTime occurrence) {
         if(occurrence==null) return 0;return excessMinutes(day.getBusinessDate().atTime(day.getStartTime()).plusMinutes(day.getGraceMinutes()),occurrence);

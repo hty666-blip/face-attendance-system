@@ -53,3 +53,7 @@ face:
 file:
   storage-path: ${FILE_STORAGE_PATH:./files}
   public-base-url: ${PUBLIC_BASE_URL:http://localhost:9090}
+attendance:
+  report:
+    scheduling-enabled: ${REPORT_SCHEDULING_ENABLED:true}
+    max-active-jobs: ${REPORT_MAX_ACTIVE_JOBS:3}

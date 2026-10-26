@@ -56,6 +56,20 @@ public class AuthorizationInterceptor implements HandlerInterceptor {
             AccessPolicy.deny();
         }
         if (path.startsWith("/attendance/")) {
+            if (path.startsWith("/attendance/reports/")) {
+                if ("GET".equals(method) && "/attendance/reports/preview".equals(path)) {
+                    StpUtil.checkPermission("records.list"); return true;
+                }
+                if ("POST".equals(method) && "/attendance/reports/exports".equals(path)) {
+                    StpUtil.checkPermission("records.list"); StpUtil.checkPermission("records.export"); return true;
+                }
+                if ("GET".equals(method) && path.matches("/attendance/reports/exports/\\d+/download")) {
+                    StpUtil.checkPermission("records.list"); StpUtil.checkPermission("records.export"); return true;
+                }
+                if ("GET".equals(method) && ("/attendance/reports/exports".equals(path) || path.matches("/attendance/reports/exports/\\d+"))) return true;
+                if ("POST".equals(method) && path.matches("/attendance/reports/exports/\\d+/cancel")) return true;
+                AccessPolicy.deny();
+            }
             if ("GET".equals(method) && "/attendance/today".equals(path)) {
                 StpUtil.checkPermission("records.add"); return true;
             }

@@ -41,7 +41,7 @@ mysql_in -e 'CREATE DATABASE attendance_verify CHARACTER SET utf8mb4; CREATE DAT
 
 mysql_in attendance_verify < "$root_dir/database/schema.sql"
 mysql_in attendance_verify < "$root_dir/database/seed.sql"
-assert_eq 'new schema has 19 tables' 19 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_verify'")"
+assert_eq 'new schema has 20 tables' 20 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_verify'")"
 assert_eq 'new schema contains no accounts' 0 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM sys_user')"
 assert_eq 'new schema contains no attendance events' 0 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM records')"
 assert_eq 'new initial policy uses Shanghai date and 08-18 shift' 1 "$(mysql_in attendance_verify -e "SET time_zone='+08:00'; SELECT COUNT(*) FROM attendance_policy WHERE effective_from=CURRENT_DATE() AND start_time='08:00:00' AND end_time='18:00:00' AND grace_minutes=0")"
@@ -69,4 +69,19 @@ if mysql_in attendance_verify -e "INSERT INTO records(user_id,business_date,acti
   exit 1
 fi
 assert_eq 'duplicate daily action rejected by MySQL' 1 "$(mysql_in attendance_verify -e 'SELECT COUNT(*) FROM records WHERE user_id=90002')"
-echo 'MySQL 8.4 new-schema and V002-to-V003 migration checks passed.'
+mysql_in attendance_upgrade_verify < "$root_dir/database/migrations/V004__attendance_exports.sql"
+assert_eq 'V004 upgraded schema has 20 tables' 20 "$(mysql_in -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='attendance_upgrade_verify'")"
+for db in attendance_verify attendance_upgrade_verify; do
+  assert_eq "$db has no invented export tasks" 0 "$(mysql_in "$db" -e 'SELECT COUNT(*) FROM attendance_export_job')"
+  assert_eq "$db grants built-in employee and manager scoped export" 2 "$(mysql_in "$db" -e "SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_role r ON r.id=rp.role_id JOIN sys_permission p ON p.id=rp.permission_id WHERE r.flag IN ('employee','manager') AND r.deleted=0 AND p.auth='records.export' AND p.deleted=0")"
+  mysql_in "$db" -e "INSERT INTO attendance_export_job(owner_id,request_key,request_hash,month,scope,scope_signature,state,created_at) VALUES(90003,'synthetic-migration-export-key',REPEAT('a',64),'2024-01','SELF',REPEAT('b',64),'CANCELLED',NOW())"
+  if mysql_in "$db" -e "INSERT INTO attendance_export_job(owner_id,request_key,request_hash,month,scope,scope_signature,state,created_at) VALUES(90003,'synthetic-migration-export-key',REPEAT('a',64),'2024-01','SELF',REPEAT('b',64),'CANCELLED',NOW())" 2>/dev/null; then
+    echo "FAIL: $db accepted duplicate owner/request key" >&2
+    exit 1
+  fi
+  mysql_in "$db" -e "INSERT INTO attendance_export_job(owner_id,request_key,request_hash,month,scope,scope_signature,state,created_at) VALUES(90004,'synthetic-migration-export-key',REPEAT('a',64),'2024-01','SELF',REPEAT('b',64),'CANCELLED',NOW())"
+  assert_eq "$db export request key is unique per owner" 2 "$(mysql_in "$db" -e "SELECT COUNT(*) FROM attendance_export_job WHERE request_key='synthetic-migration-export-key'")"
+done
+assert_eq 'V004 preserves legacy event and new action fields' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM records WHERE id=90001 AND address='synthetic migration address' AND business_date IS NULL AND action IS NULL")"
+assert_eq 'V004 preserves initial policy' 1 "$(mysql_in attendance_upgrade_verify -e "SELECT COUNT(*) FROM attendance_policy WHERE start_time='08:00:00' AND end_time='18:00:00'")"
+echo 'MySQL 8.4 new-schema and V002-to-V003-to-V004 migration checks passed.'

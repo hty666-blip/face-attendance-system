@@ -6,7 +6,9 @@ import MonthResults from '@/components/attendance/MonthResults.vue'
 import RequestForm from '@/components/attendance/RequestForm.vue'
 import RequestsPanel from '@/components/attendance/RequestsPanel.vue'
 import PolicyCalendar from '@/components/attendance/PolicyCalendar.vue'
+import MonthlyReports from '@/components/attendance/MonthlyReports.vue'
 import '@/assets/css/attendance.css'
+import '@/assets/css/attendance-reports.css'
 const userStore = useUserStore(), auths = computed(() => userStore.getAuths)
 const canRead = computed(() => auths.value.includes('records.list') || auths.value.includes('leaveapply.list'))
 const canCorrection = computed(() => auths.value.includes('records.add')), canLeave = computed(() => auths.value.includes('leaveapply.add'))
@@ -27,6 +29,7 @@ const created = () => {changed(); active.value = 'requests'}
     <el-alert v-if="!canRead" title="当前账号没有考勤或请假查询权限，请联系管理员。" type="warning" :closable="false" show-icon />
     <el-tabs v-else v-model="active" @tab-change="name => {if (name === 'month') monthPanel?.load(); if (name === 'requests') requestsPanel?.load()}">
       <el-tab-pane v-if="auths.includes('records.list')" label="我的月度考勤" name="month"><MonthResults ref="monthPanel" @apply="apply" /></el-tab-pane>
+      <el-tab-pane v-if="auths.includes('records.list')" label="月度报表与导出" name="reports" lazy><MonthlyReports /></el-tab-pane>
       <el-tab-pane label="申请与审批" name="requests"><RequestsPanel ref="requestsPanel" :reviewer="reviewer" @changed="decided" /></el-tab-pane>
       <el-tab-pane v-if="canCorrection || canLeave" label="提交申请" name="apply"><RequestForm :seed="seed" :can-correction="canCorrection" :can-leave="canLeave" @created="created" /></el-tab-pane>
       <el-tab-pane v-if="administrator" label="规则与工作日" name="configuration"><PolicyCalendar :editable="administrator" /></el-tab-pane>

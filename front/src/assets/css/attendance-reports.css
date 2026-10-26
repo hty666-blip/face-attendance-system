@@ -1,0 +1,32 @@
+.report-workspace h2 {font-size:21px;font-weight:600;margin:0 0 8px}
+.report-workspace h3 {font-size:18px;font-weight:600;margin:0}
+.report-query {display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px 20px;margin-top:24px}
+.report-query .el-form-item {width:210px;margin-bottom:8px}
+.report-query .el-select,.report-query .el-date-editor {width:100%}
+.report-query .report-query-action {width:auto}
+.report-preview {margin-top:28px}
+.report-result-heading {margin-bottom:16px}
+.report-summary {display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px 24px;padding:20px 0;margin:16px 0;border-block:1px solid #dfe2e9}
+.report-summary dt {color:#555e6d;font-size:14px}
+.report-summary dd {margin:4px 0 0;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.report-summary dd span {font-size:14px;font-weight:400;color:#555e6d}
+.report-result-tabs {margin-top:20px}
+.report-result-tabs .attendance-table {margin-top:8px}
+.report-secondary {color:#555e6d;font-size:13px}
+.report-export-action,.report-jobs-heading {display:flex;gap:16px 24px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:32px 0 12px}
+.report-export-action {padding-top:24px;border-top:1px solid #dfe2e9}
+.report-task-actions {display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.report-task-actions .el-button {margin-left:0}
+.report-task-detail {margin-top:24px;padding-top:20px;border-top:1px solid #dfe2e9}
+.report-task-detail h4 {font-size:16px;margin:0}
+.report-workspace .el-pagination {flex-wrap:wrap;row-gap:8px;max-width:100%}
+@media (max-width:760px) {
+  .report-query {gap:8px 16px}
+  .report-query .el-form-item {width:100%;min-width:0}
+  .report-query .report-query-action {width:100%}
+  .report-query-action .el-button {width:100%}
+  .report-summary {grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .report-export-action,.report-jobs-heading {align-items:flex-start;flex-direction:column}
+  .report-export-action > .el-button {width:100%}
+  .report-result-tabs .attendance-toolbar .el-select {width:100%}
+}
