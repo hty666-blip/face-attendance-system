@@ -13,6 +13,23 @@ function Assert-SafetyThrows {
     try { & $Operation } catch { $threw=$true }
     Assert-Safety $threw $Message
 }
+function Write-SafetyFixtureDiagnostic {
+    param($Child,[string]$ErrorPath)
+    $code=if($Child.Process.HasExited){[string]$Child.Process.ExitCode}else{'still-running'}
+    $text=''
+    if (Test-Path -LiteralPath $ErrorPath -PathType Leaf) {
+        $inputStream=$null;$reader=$null
+        try {
+            $inputStream=[IO.File]::Open($ErrorPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            $reader=[IO.StreamReader]::new($inputStream,[Text.Encoding]::UTF8)
+            $text=$reader.ReadToEnd()
+            if($text.Length -gt 2000){$text=$text.Substring(0,2000)}
+            $text=$text -replace '[\r\n]+',' '
+        } catch { $text='controlled fixture log unavailable' }
+        finally { if($reader){$reader.Dispose()}elseif($inputStream){$inputStream.Dispose()} }
+    }
+    Write-Host ('Controlled lock fixture: exit=' + $code + '; stderr=' + $text)
+}
 $testRoot=Get-DemoProjectRoot
 $testRun=[Guid]::NewGuid().ToString('N')
 $testDirectory=$null
@@ -191,7 +208,25 @@ try {
 
     # 只启动一个无业务、无子进程的PowerShell夹具，验证实际Windows参数和环境传递。
     $fixture=Join-Path $testDirectory 'argument-fixture.ps1'
-    $fixtureText='param([string]$Value,[string]$StopLockPath,[string]$ReadyPath); [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); if($env:DB_URL){exit 31}; if($StopLockPath){$hold=[IO.File]::Open($StopLockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None);try{[IO.File]::WriteAllText($ReadyPath,"ready");Start-Sleep -Milliseconds 2000}finally{$hold.Dispose()}}; [Console]::Out.Write($Value); [Console]::Error.Write("stderr-ok")'
+    $fixtureText=@'
+param([string]$Value,[string]$StopLockPath,[string]$ReadyPath,[string]$ReleasePath)
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+if($env:DB_URL){exit 31}
+if($StopLockPath){
+    $hold=[IO.File]::Open($StopLockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try{
+        [IO.File]::WriteAllText($ReadyPath,'ready')
+        $deadline=[DateTime]::UtcNow.AddSeconds(30)
+        while(-not [IO.File]::Exists($ReleasePath)){
+            if([DateTime]::UtcNow -ge $deadline){[Console]::Error.Write('synthetic release handshake timeout');exit 32}
+            Start-Sleep -Milliseconds 25
+        }
+    }finally{$hold.Dispose()}
+}
+[Console]::Out.Write([string]$Value)
+[Console]::Error.Write('stderr-ok')
+'@
     [IO.File]::WriteAllText($fixture,$fixtureText,[Text.UTF8Encoding]::new($false))
     $executable=Resolve-DemoExecutable -Command 'powershell.exe'
     $argumentValue='space "quote" C:\trailing\ 中文'
@@ -206,12 +241,19 @@ try {
     $errorText=[IO.File]::ReadAllText((Join-Path $testDirectory 'logs/safety.err.log'),[Text.Encoding]::UTF8)
     Assert-Safety ($errorText -ceq 'stderr-ok') 'stdout/stderr异步日志均完成'
     $lockReady=Join-Path $testDirectory 'lock-ready.txt'
-    $testChild=Start-DemoChild 'safety-lock' $executable @('-NoProfile','-NonInteractive','-File',$fixture,'-StopLockPath',(Join-Path $testDirectory '.stop.lock'),'-ReadyPath',$lockReady) $testDirectory $environment $testDirectory
-    $lockDeadline=[DateTime]::UtcNow.AddSeconds(10)
-    while (-not (Test-Path -LiteralPath $lockReady) -and [DateTime]::UtcNow -lt $lockDeadline) { Start-Sleep -Milliseconds 25 }
+    $lockRelease=Join-Path $testDirectory 'lock-release.txt'
+    $lockErrorPath=Join-Path $testDirectory 'logs/safety-lock.err.log'
+    $testChild=Start-DemoChild 'safety-lock' $executable @('-NoProfile','-NonInteractive','-File',$fixture,'-Value','synthetic-lock','-StopLockPath',(Join-Path $testDirectory '.stop.lock'),'-ReadyPath',$lockReady,'-ReleasePath',$lockRelease) $testDirectory $environment $testDirectory
+    $lockDeadline=[DateTime]::UtcNow.AddSeconds(25)
+    while (-not (Test-Path -LiteralPath $lockReady) -and -not $testChild.Process.HasExited -and [DateTime]::UtcNow -lt $lockDeadline) { Start-Sleep -Milliseconds 25 }
+    if(-not (Test-Path -LiteralPath $lockReady)){Write-SafetyFixtureDiagnostic $testChild $lockErrorPath}
     Assert-Safety (Test-Path -LiteralPath $lockReady -PathType Leaf) '受控子进程已持有同轮停止锁'
     Assert-SafetyThrows { Enter-DemoStopLock $testRoot $testRun -TimeoutMilliseconds 100 } '跨进程锁阻止并行清理'
-    Assert-Safety ($testChild.Process.WaitForExit(10000) -and $testChild.Process.ExitCode -eq 0) '持锁子进程正常释放并退出'
+    [IO.File]::WriteAllText($lockRelease,'release')
+    $lockExited=$testChild.Process.WaitForExit(25000)
+    if(-not $lockExited -or $testChild.Process.ExitCode -ne 0){Write-SafetyFixtureDiagnostic $testChild $lockErrorPath}
+    Assert-Safety $lockExited '释放信号后持锁子进程按时退出'
+    Assert-Safety ($testChild.Process.ExitCode -eq 0) '持锁子进程正常退出码'
     Close-DemoChildHandles $testChild;$testChild=$null
     $afterChildLock=Enter-DemoStopLock $testRoot $testRun -TimeoutMilliseconds 100
     Assert-Safety ($afterChildLock.CanWrite) '跨进程释放后可重入清理'
@@ -231,7 +273,7 @@ try {
     }
     if ($testDirectory -and (Test-Path -LiteralPath $testDirectory)) {
         # 仅删除本测试明确创建的文件和空目录，无递归删除。
-        foreach ($relative in @('manifest.json','argument-fixture.ps1','logs/safety.out.log','logs/safety.err.log','logs/safety-lock.out.log','logs/safety-lock.err.log','lock-ready.txt','.stop.lock','files/keep.txt')) {
+        foreach ($relative in @('manifest.json','argument-fixture.ps1','logs/safety.out.log','logs/safety.err.log','logs/safety-lock.out.log','logs/safety-lock.err.log','lock-ready.txt','lock-release.txt','.stop.lock','files/keep.txt')) {
             $testFile=Join-Path $testDirectory $relative
             if (Test-Path -LiteralPath $testFile) { Remove-Item -LiteralPath $testFile -Force }
         }
