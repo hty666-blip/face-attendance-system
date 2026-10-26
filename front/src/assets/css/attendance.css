@@ -1,0 +1,34 @@
+.attendance-workspace {color:#303744;font-size:16px;min-width:0;line-height:1.6}
+.attendance-heading {display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.attendance-heading h1 {font-size:24px;margin:0;font-weight:600}
+.attendance-heading p,.attendance-note {margin:6px 0 0;color:#555e6d;max-width:75ch}
+.attendance-section {padding:16px 0;min-width:0}
+.attendance-toolbar {display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.attendance-toolbar .el-button,.attendance-actions .el-button {margin-left:0}
+.attendance-actions {display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:16px}
+.attendance-table {width:100%;overflow-x:auto;margin:16px 0}
+.attendance-table .el-table {width:100%;font-size:14px}
+.attendance-table .cell {overflow-wrap:anywhere}
+.attendance-form {max-width:720px;margin-top:20px}
+.attendance-form .el-select,.attendance-form .el-date-editor,.attendance-form .el-input {width:100%}
+.attendance-form .el-form-item__label {color:#454e5c}
+.attendance-field-pair {display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.attendance-error {margin:12px 0}
+.attendance-basis {font-size:14px;color:#555e6d;line-height:1.6;white-space:normal}
+.attendance-detail {display:grid;gap:16px;overflow-wrap:anywhere}
+.attendance-detail h3 {margin:12px 0 0;font-size:18px}
+.attendance-facts {display:grid;grid-template-columns:max-content 1fr;gap:8px 16px;margin:0}
+.attendance-facts dt {color:#555e6d}
+.attendance-facts dd {margin:0;white-space:pre-wrap}
+.attendance-history {padding-left:24px;margin:0}
+.attendance-history li {padding:8px 0}
+.attendance-policy-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media (max-width:760px) {
+  .attendance-field-pair,.attendance-policy-grid {grid-template-columns:1fr}
+  .attendance-form .el-form-item__label {float:none;text-align:left}
+  .attendance-facts {grid-template-columns:1fr;gap:4px}
+  .attendance-facts dd {margin-bottom:8px}
+  .attendance-toolbar .el-date-editor {max-width:100%}
+}
+
+.attendance-dialog .el-dialog__body {max-height:calc(90vh - 128px);overflow-y:auto;overflow-wrap:anywhere}

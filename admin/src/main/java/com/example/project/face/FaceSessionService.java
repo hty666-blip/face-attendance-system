@@ -7,6 +7,8 @@ import com.example.project.exception.ServiceException;
 import com.example.project.mapper.*;
 import com.example.project.service.*;
 import com.example.project.utils.SessionUtils;
+import com.example.project.attendance.AttendanceClock;
+import com.example.project.attendance.AttendanceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import javax.annotation.Resource;
@@ -22,11 +24,12 @@ public class FaceSessionService {
     @Resource private FaceTemplateMapper templates;
     @Resource private FaceCheckInSessionMapper sessions;
     @Resource private UserMapper userMapper;
-    @Resource private IRecordsService records;
-    @Resource private IRulesService rules;
+    @Resource private AttendanceService attendance;
+    @Resource private AttendanceClock clock;
     @Resource private TransactionTemplate tx;
-    public static LocalDateTime now(){return LocalDateTime.now(ZoneId.of("Asia/Shanghai"));}
-    public Map<String,Object> create() {
+    private LocalDateTime now(){return clock.now();}
+    public Map<String,Object> create(){return create(null);}
+    public Map<String,Object> create(String requestedAction) {
         User actor=SessionUtils.getUser();FaceProvider provider=providers.current();
         return tx.execute(status -> {
             // 锁定稳定存在的用户行，使计数与插入在并发创建时仍保证每人最多三个有效会话。
@@ -34,6 +37,7 @@ public class FaceSessionService {
             cn.dev33.satoken.stp.StpUtil.checkPermission("records.add");
             FaceTemplate template=templateService.requireActive(actor.getId(),provider);
             LocalDateTime created=now();
+            String action=attendance.chooseAction(actor.getId(),requestedAction);
             // 只清理本人30天前的会话；考勤记录不会随会话清理而删除。
             sessions.delete(new QueryWrapper<FaceCheckInSession>().eq("user_id",actor.getId()).lt("created_at",created.minusDays(30)));
             if(sessions.selectCount(new QueryWrapper<FaceCheckInSession>().eq("user_id",actor.getId())
@@ -41,10 +45,11 @@ public class FaceSessionService {
                 throw new ServiceException("429","已有多个有效打卡会话，请稍后再试");
             FaceCheckInSession row=new FaceCheckInSession();row.setId(UUID.randomUUID().toString().replace("-","")+UUID.randomUUID().toString().replace("-",""));
             row.setUserId(actor.getId());row.setProvider(provider.id());row.setTemplateVersion(template.getVersion());
+            row.setBusinessDate(clock.today());row.setAction(action);
             row.setCreatedAt(created);row.setExpiresAt(created.plusMinutes(2));row.setState("PENDING");
             if(sessions.insert(row)!=1) throw new ServiceException("打卡会话创建失败，请稍后重试");
             Map<String,Object> result=new LinkedHashMap<>();result.put("challengeId",row.getId());result.put("expiresAt",row.getExpiresAt());
-            result.put("provider",provider.id());return result;
+            result.put("provider",provider.id());result.put("action",row.getAction());result.put("businessDate",row.getBusinessDate());return result;
         });
     }
     public Map<String,Object> verify(String challengeId,String image,String address) {
@@ -61,6 +66,8 @@ public class FaceSessionService {
             if(!fingerprint.equals(attempt.getRequestHash())) throw new ServiceException("409","会话已使用，请重新打开打卡窗口");
             return result(attempt.getRecordId(),true);
         }
+        if(attempt.getBusinessDate()==null || !attempt.getBusinessDate().equals(clock.today()) || attempt.getAction()==null)
+            throw new ServiceException("409","打卡会话已跨日或不包含动作，请重新打开窗口");
         if(!attempt.getExpiresAt().isAfter(now())) throw new ServiceException("409","打卡会话已过期，请重新打开打卡窗口");
         FaceTemplate template=templateService.requireActive(actor.getId(),provider);
         if(!template.getVersion().equals(attempt.getTemplateVersion())) throw new ServiceException("409","人脸模板已更新，请重新打开打卡窗口");
@@ -85,8 +92,7 @@ public class FaceSessionService {
                 if(locked==null || !Boolean.TRUE.equals(locked.getActive()) || !locked.getVersion().equals(attempt.getTemplateVersion()))
                     throw new ServiceException("409","人脸模板已撤销或更新，请重新打开打卡窗口");
                 if(!attempt.getExpiresAt().isAfter(now())) throw new ServiceException("409","打卡会话已过期，请重新打开窗口");
-                Records row=new Records();row.setUserId(current.getId());row.setAddress(address);row.setStateRadio(attendanceState());
-                if(!records.save(row) || row.getId()==null) throw new ServiceException("考勤保存失败，请稍后重试");
+                Records row=attendance.record(current.getId(),attempt.getAction(),attempt.getBusinessDate(),now(),"FACE",address,null);
                 int changed=sessions.update(null,new UpdateWrapper<FaceCheckInSession>().eq("id",challengeId).eq("state","PROCESSING")
                         .eq("request_hash",fingerprint).set("state","SUCCEEDED").set("record_id",row.getId()));
                 if(changed!=1) throw new ServiceException("409","打卡状态冲突，请先检查考勤记录");
@@ -98,14 +104,6 @@ public class FaceSessionService {
             } catch(RuntimeException cleanupError) {error.addSuppressed(cleanupError);}
             throw error;
         }
-    }
-    private String attendanceState() {
-        Map<String,String> times=new HashMap<>();for(Rules rule:rules.list()) times.put(rule.getName(),rule.getTime());
-        LocalTime start,end;
-        try{start=LocalTime.parse(times.get("上班时间"));end=LocalTime.parse(times.get("下班时间"));}
-        catch(Exception error){throw new ServiceException("考勤规则未配置完整，请联系管理员");}
-        LocalTime current=now().toLocalTime();
-        return current.isBefore(LocalTime.NOON)?(current.isAfter(start)?"迟到":"正常"):(current.isBefore(end)?"早退":"正常");
     }
     private Map<String,Object> result(Integer recordId,boolean replay) {
         if(recordId==null) throw new ServiceException("409","打卡状态异常，请先检查考勤记录");

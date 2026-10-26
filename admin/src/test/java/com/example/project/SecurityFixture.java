@@ -25,6 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties={"face.enabled=true", "face.template-key=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}) @AutoConfigureMockMvc @ActiveProfiles("test")
 abstract class SecurityFixture {
+    static final java.time.LocalDateTime NOW = java.time.LocalDateTime.of(2026,10,26,9,0);
+    @SpyBean com.example.project.attendance.AttendanceClock attendanceClock;
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate db;
     @Autowired ObjectMapper json;
@@ -40,8 +42,10 @@ abstract class SecurityFixture {
 
     @BeforeEach void fixture() throws Exception {
         // MyBatis MapperFactoryBean 产生的代理不依赖 Spring 的自动重置顺序。
-        reset(templateMapper,userService,recordService,employees,localFace,face);
-        for (String table : Arrays.asList("face_checkin_session","face_template","sys_role_permission","sys_permission","sys_role","employee","manager","dept","records","leaveapply","rules","notice","sys_user"))
+        reset(templateMapper,userService,recordService,employees,localFace,face,attendanceClock);
+        doReturn(NOW).when(attendanceClock).now();
+        doReturn(NOW.toLocalDate()).when(attendanceClock).today();
+        for (String table : Arrays.asList("attendance_approval","attendance_request","attendance_day","attendance_calendar","attendance_policy","face_checkin_session","face_template","sys_role_permission","sys_permission","sys_role","employee","manager","dept","records","leaveapply","rules","notice","sys_user"))
             db.update("DELETE FROM " + table);
         db.update("INSERT INTO sys_role(id,name,flag,deleted) VALUES(1,'admin','ADMIN',0),(2,'manager','manager',0),(3,'employee','employee',0)");
         int id=1;
@@ -59,9 +63,10 @@ abstract class SecurityFixture {
         db.update("INSERT INTO dept(id,name,user_id) VALUES(1,'部门A',2),(2,'部门B',3)");
         db.update("INSERT INTO employee(id,username,name,user_id,dept_id) VALUES(1,'u4','人员4',4,1),(2,'u5','人员5',5,2)");
         db.update("INSERT INTO manager(id,username,name,user_id,dept_id) VALUES(1,'u2','人员2',2,1),(2,'u3','人员3',3,2)");
-        db.update("INSERT INTO records(id,user_id,address,state_radio) VALUES(1,4,'地点A','正常'),(2,5,'地点B','迟到')");
+        db.update("INSERT INTO records(id,user_id,address,state_radio,dept_id) VALUES(1,4,'地点A','正常',1),(2,5,'地点B','迟到',2)");
         db.update("INSERT INTO leaveapply(id,user_id,type_radio,periods,content,state_radio) VALUES(1,4,'事假','1天','原因A','审核中'),(2,5,'病假','1天','原因B','审核中')");
         db.update("INSERT INTO rules(id,name,time) VALUES(1,'上班时间','08:00'),(2,'下班时间','18:00')");
+        db.update("INSERT INTO attendance_policy(id,effective_from,start_time,end_time,grace_minutes,created_by,created_at) VALUES(1,'2026-09-01','08:00:00','18:00:00',0,1,'2026-09-01 00:00:00')");
         when(localFace.id()).thenReturn("local");
         when(localFace.modelVersion()).thenReturn(com.example.project.face.LocalFaceProvider.MODEL);
         when(localFace.threshold()).thenReturn(0.45d);

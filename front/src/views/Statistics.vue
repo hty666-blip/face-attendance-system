@@ -19,7 +19,7 @@
 
     let leaveStaticsOption = {
       title: {
-        text: '请假情况统计',
+        text: '旧请假类型分布（申请条数）',
         left: 'center'
       },
       tooltip: {
@@ -67,7 +67,7 @@
 
     let recordsStaticsOption = {
       title: {
-        text: '考勤情况统计',
+        text: '原始事件状态分布（事件条数）',
         left: 'center'
       },
       tooltip: {
@@ -128,6 +128,7 @@
 
 <template>
   <div style="background-color: #ffffff;padding: 10px;border-radius: 10px;margin-top: 20px;">
+    <p style="font-size:16px;line-height:1.6;color:#46515d">此页统计可见原始事件与旧请假申请的条数，不能作为出勤天数或新日结结果。请前往 <router-link to="/attendance">考勤工作台</router-link> 核对每日结果、批准请假与补卡。</p>
     <div>
       <el-row :gutter="10">
 

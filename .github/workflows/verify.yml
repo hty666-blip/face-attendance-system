@@ -1,6 +1,25 @@
 name: Verify
 on: [push, pull_request]
 jobs:
+  database:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # 仅此无数据、无端口映射的 CI 临时容器使用，不是真实凭据。
+          MYSQL_ROOT_PASSWORD: ci-only-migration-test
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify clean schema and V003 upgrade
+        env:
+          MYSQL_TEST_CONTAINER: ${{ job.services.mysql.id }}
+        run: bash database/tests/verify-migrations.sh "$MYSQL_TEST_CONTAINER"
   backend:
     runs-on: ubuntu-latest
     steps:

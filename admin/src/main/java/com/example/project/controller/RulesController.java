@@ -57,23 +57,13 @@ public class RulesController {
     @AutoLog("新增考勤规则")
     @PostMapping
     public Result save(@RequestBody Rules rules) {
-
-
-
-        validate(rules); rulesService.save(rules);
-        return Result.success();
+        throw new com.example.project.exception.ServiceException("409", "请在考勤工作台追加带生效日期的新规则");
     }
 
     @AutoLog("编辑考勤规则")
     @PutMapping
     public Result update(@RequestBody Rules rules) {
-        validate(rules);
-        com.example.project.entity.Rules old = rulesService.getById(rules.getId());
-        if (old == null || !old.getName().equals(rules.getName())) throw new com.example.project.exception.ServiceException("规则名称不可修改");
-        rulesService.updateById(rules);
-
-
-        return Result.success();
+        throw new com.example.project.exception.ServiceException("409", "旧规则已冻结，请在考勤工作台维护未来规则版本");
     }
 
     @AutoLog("删除考勤规则")

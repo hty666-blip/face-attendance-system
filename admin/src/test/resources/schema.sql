@@ -160,3 +160,88 @@ CREATE TABLE IF NOT EXISTS face_checkin_session (
   created_at datetime NOT NULL,
   PRIMARY KEY (id)
 );
+
+-- V003 test schema
+CREATE TABLE IF NOT EXISTS attendance_policy (
+  id bigint NOT NULL AUTO_INCREMENT,
+  effective_from date NOT NULL,
+  start_time time NOT NULL,
+  end_time time NOT NULL,
+  grace_minutes int NOT NULL DEFAULT 0,
+  created_by int NOT NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_attendance_policy_date (effective_from)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_calendar (
+  date date NOT NULL,
+  working_day boolean NOT NULL,
+  note varchar(200) NOT NULL,
+  updated_by int NOT NULL,
+  updated_at datetime NOT NULL,
+  PRIMARY KEY (date)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_day (
+  id bigint NOT NULL AUTO_INCREMENT,
+  user_id int NOT NULL,
+  business_date date NOT NULL,
+  dept_id int NOT NULL DEFAULT 0,
+  working_day boolean NOT NULL,
+  policy_id bigint NOT NULL,
+  start_time time NOT NULL,
+  end_time time NOT NULL,
+  grace_minutes int NOT NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_attendance_day (user_id,business_date)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_request (
+  id bigint NOT NULL AUTO_INCREMENT,
+  user_id int NOT NULL,
+  dept_id int NOT NULL DEFAULT 0,
+  request_key varchar(64) NOT NULL,
+  request_hash varchar(64) NOT NULL,
+  kind varchar(20) NOT NULL,
+  business_date date,
+  action varchar(3),
+  correction_time datetime,
+  start_date date,
+  start_half varchar(2),
+  end_date date,
+  end_half varchar(2),
+  leave_type varchar(20),
+  reason varchar(1000) NOT NULL,
+  state varchar(20) NOT NULL,
+  version int NOT NULL,
+  decision_by int,
+  decision_at datetime,
+  decision_comment varchar(500),
+  created_at datetime NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_attendance_request_key (user_id,request_key)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_approval (
+  id bigint NOT NULL AUTO_INCREMENT,
+  request_id bigint NOT NULL,
+  actor_id int NOT NULL,
+  from_state varchar(20),
+  to_state varchar(20) NOT NULL,
+  comment varchar(1000),
+  created_at datetime NOT NULL,
+  PRIMARY KEY (id)
+);
+
+ALTER TABLE records ADD COLUMN IF NOT EXISTS business_date date;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS action varchar(3);
+ALTER TABLE records ADD COLUMN IF NOT EXISTS occurred_at datetime;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS source varchar(20);
+ALTER TABLE records ADD COLUMN IF NOT EXISTS dept_id int;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS request_id bigint;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_event ON records(user_id,business_date,action);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_request_event ON records(request_id);
+ALTER TABLE face_checkin_session ADD COLUMN IF NOT EXISTS business_date date;
+ALTER TABLE face_checkin_session ADD COLUMN IF NOT EXISTS action varchar(3);

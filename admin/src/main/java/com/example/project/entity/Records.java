@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import cn.hutool.core.annotation.Alias;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
@@ -62,6 +63,15 @@ private static final long serialVersionUID = 1L;
     @ApiModelProperty("状态,迟到|早退")
     @Alias("状态,迟到|早退")
     private String stateRadio;
+
+    @Alias("业务日期") private LocalDate businessDate;
+    @Alias("动作") private String action;
+    @Alias("发生时间")
+    @JsonFormat(shape=JsonFormat.Shape.STRING, pattern="yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime occurredAt;
+    @Alias("来源") private String source;
+    @Alias("当时部门") private Integer deptId;
+    @Alias("补卡申请") private Long requestId;
 
 
 

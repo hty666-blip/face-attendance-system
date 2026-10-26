@@ -31,7 +31,7 @@ public class AuthorizationInterceptor implements HandlerInterceptor {
                 try {
                     int n = Integer.parseInt(value);
                     if (n < 1 || ("pageSize".equals(key) && n > 100)) throw new NumberFormatException();
-                } catch (NumberFormatException e) { throw new ServiceException("分页参数无效，单页最多100条"); }
+                } catch (NumberFormatException e) { throw new ServiceException("422", "分页参数无效，单页最多100条"); }
             }
         }
         if ("/getCurrentUser".equals(path) && "GET".equals(method)) return true;
@@ -55,10 +55,43 @@ public class AuthorizationInterceptor implements HandlerInterceptor {
             }
             AccessPolicy.deny();
         }
+        if (path.startsWith("/attendance/")) {
+            if ("GET".equals(method) && "/attendance/today".equals(path)) {
+                StpUtil.checkPermission("records.add"); return true;
+            }
+            if ("GET".equals(method) && "/attendance/month".equals(path)) {
+                StpUtil.checkPermission("records.list"); return true;
+            }
+            if (Arrays.asList("/attendance/policies", "/attendance/calendar").contains(path)) {
+                if ("GET".equals(method)) {
+                    if (!StpUtil.hasPermission("rules.list") && !StpUtil.hasPermission("records.list")
+                            && !StpUtil.hasPermission("leaveapply.add")) AccessPolicy.deny();
+                    return true;
+                }
+                if ("POST".equals(method)) {policy.adminOnly(); StpUtil.checkPermission("rules.edit"); return true;}
+            }
+            if ("GET".equals(method) && ("/attendance/requests".equals(path) || path.matches("/attendance/requests/\\d+"))) {
+                if (!StpUtil.hasPermission("records.list") && !StpUtil.hasPermission("leaveapply.list")) AccessPolicy.deny();
+                return true; // Service根据申请类型、本人/部门与历史部门再次过滤。
+            }
+            if ("POST".equals(method) && "/attendance/requests".equals(path)) {
+                if (!StpUtil.hasPermission("records.add") && !StpUtil.hasPermission("leaveapply.add")) AccessPolicy.deny();
+                return true;
+            }
+            if ("POST".equals(method) && path.matches("/attendance/requests/\\d+/cancel")) return true;
+            if ("POST".equals(method) && path.matches("/attendance/requests/\\d+/decision")) {
+                if (!Arrays.asList("ADMIN", "manager").contains(SessionUtils.getUser().getRole())) AccessPolicy.deny();
+                if (!StpUtil.hasPermission("records.edit") && !StpUtil.hasPermission("leaveapply.edit")) AccessPolicy.deny();
+                return true;
+            }
+            AccessPolicy.deny();
+        }
         if (path.startsWith("/file/")) return true; // 文件内部检查所有者与共享图片属性。
         if (path.startsWith("/statistics/") && "GET".equals(method)) {
             if (!Arrays.asList("ADMIN", "manager").contains(SessionUtils.getUser().getRole())) AccessPolicy.deny();
-            return true;
+            if ("/statistics/recordsStatics".equals(path)) {StpUtil.checkPermission("records.list"); return true;}
+            if ("/statistics/leaveStatics".equals(path)) {StpUtil.checkPermission("leaveapply.list"); return true;}
+            AccessPolicy.deny();
         }
         String[] parts = path.substring(1).split("/");
         String resource = parts[0];

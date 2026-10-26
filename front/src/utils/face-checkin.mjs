@@ -3,14 +3,17 @@ export class CheckInAttempt {
   constructor(api) {this.api = api; this.generation = 0; this.clear()}
   clear() {
     this.generation++; this.phase = 'idle'; this.error = ''; this.session = null
-    this.expiresAt = null; this.attempt = null
+    this.expiresAt = null; this.attempt = null; this.action = null
   }
-  async prepare() {
+  async prepare(action) {
+    if (this.attempt && ['uncertain', 'processing', 'verifying'].includes(this.phase)) return false
     this.clear()
+    if (!['IN', 'OUT'].includes(action)) {this.phase = 'failed'; this.error = '请先选择服务端允许的签到或签退动作。'; return false}
+    this.action = action
     const generation = this.generation
     this.phase = 'preparing'
     try {
-      const result = await this.api.post('/face/challenge')
+      const result = await this.api.post('/face/challenge', {action})
       if (generation !== this.generation) return
       if (result.code !== '200') throw new Error(result.msg || '无法准备打卡，请重试。')
       this.session = result.data.challengeId; this.expiresAt = result.data.expiresAt

@@ -60,10 +60,7 @@ public class LeaveapplyController {
     @AutoLog("新增请假申请")
     @PostMapping
     public Result save(@RequestBody Leaveapply input) {
-        Leaveapply row = new Leaveapply(); row.setUserId(SessionUtils.getUser().getId());
-        row.setTypeRadio(input.getTypeRadio()); row.setPeriods(input.getPeriods());
-        row.setContent(clean(input.getContent())); row.setStateRadio("审核中");
-        validate(row); leaveapplyService.save(row); return Result.success();
+        throw new com.example.project.exception.ServiceException("409", "请在考勤工作台提交带起止日期的请假申请");
     }
     private String clean(String text) {
         return org.jsoup.Jsoup.clean(text == null ? "" : text, org.jsoup.safety.Safelist.basicWithImages());
@@ -87,8 +84,7 @@ public class LeaveapplyController {
         Leaveapply patch = new Leaveapply(); patch.setId(old.getId());
         User actor = SessionUtils.getUser();
         if ("employee".equals(actor.getRole())) {
-            accessPolicy.requireSelf(old.getUserId());
-            patch.setTypeRadio(input.getTypeRadio()); patch.setPeriods(input.getPeriods()); patch.setContent(clean(input.getContent())); validate(patch);
+            throw new com.example.project.exception.ServiceException("409", "旧申请缺少可靠日期，请撤回后在考勤工作台重新提交");
         } else {
             if (actor.getId().equals(old.getUserId())) throw new com.example.project.exception.ServiceException("不能审核本人申请");
             if (!java.util.Arrays.asList("通过","不通过").contains(input.getStateRadio())) throw new com.example.project.exception.ServiceException("请选择审核结果");

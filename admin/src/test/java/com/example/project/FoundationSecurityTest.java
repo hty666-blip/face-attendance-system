@@ -72,18 +72,16 @@ class FoundationSecurityTest extends SecurityFixture {
                 .andExpect(jsonPath("$.code").value("403"));
         assertEquals(5,db.queryForObject("SELECT COUNT(*) FROM sys_user",Integer.class));
     }
-    @Test void leaveSubmissionOverridesOwnerAndApprovalFields() throws Exception {
+    @Test void legacyFreeTextLeaveCannotCreateNewAttendanceFacts() throws Exception {
         mvc.perform(post("/leaveapply").header("Authorization",employee).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"id\":99,\"userId\":5,\"typeRadio\":\"事假\",\"periods\":\"1天\",\"content\":\"<script>bad()</script><p>原因</p>\",\"stateRadio\":\"通过\",\"remarks\":\"伪造审批\"}"))
-                .andExpect(jsonPath("$.code").value("200"));
-        Map<String,Object> row=db.queryForMap("SELECT user_id,state_radio,remarks,content FROM leaveapply ORDER BY id DESC LIMIT 1");
-        assertEquals(4,row.get("user_id")); assertEquals("审核中",row.get("state_radio")); assertNull(row.get("remarks"));
-        assertFalse(row.get("content").toString().contains("script"));
+                .content("{\"id\":99,\"userId\":5,\"typeRadio\":\"事假\",\"periods\":\"1天\",\"stateRadio\":\"通过\"}"))
+                .andExpect(jsonPath("$.code").value("409"));
+        assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM leaveapply",Integer.class));
     }
     @Test void employeeCannotApproveAndManagerCannotApproveOtherDepartment() throws Exception {
         mvc.perform(put("/leaveapply").header("Authorization",employee).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"id\":1,\"typeRadio\":\"事假\",\"periods\":\"2天\",\"stateRadio\":\"通过\"}"))
-                .andExpect(jsonPath("$.code").value("200"));
+                .andExpect(jsonPath("$.code").value("409"));
         assertEquals("审核中",db.queryForObject("SELECT state_radio FROM leaveapply WHERE id=1",String.class));
         mvc.perform(put("/leaveapply").header("Authorization",manager).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"id\":2,\"stateRadio\":\"通过\"}"))
@@ -131,7 +129,7 @@ class FoundationSecurityTest extends SecurityFixture {
     }
     @Test void excessivePaginationIsRejected() throws Exception {
         mvc.perform(get("/records/page?pageNum=1&pageSize=100000").header("Authorization",admin))
-                .andExpect(jsonPath("$.code").value("500"));
+                .andExpect(jsonPath("$.code").value("422"));
     }
     @Test void successfulCreationAndUpdateKeepAccountProfileLinked() throws Exception {
         mvc.perform(post("/employee").header("Authorization",admin).contentType(MediaType.APPLICATION_JSON)

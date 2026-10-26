@@ -7,6 +7,10 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurationSupport;
+import org.springframework.http.converter.HttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import java.util.List;
 
 /**
  * web配置
@@ -14,6 +18,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurationSupp
 @Configuration
 public class MyWebMvcConfig extends WebMvcConfigurationSupport {
     @javax.annotation.Resource private com.example.project.security.AuthorizationInterceptor authorizationInterceptor;
+    @Override
+    protected void extendMessageConverters(List<HttpMessageConverter<?>> converters) {
+        // 手动 MVC 配置没有沿用 Boot 的日期输出默认值；新日结果和配置统一使用ISO字符串。
+        for(HttpMessageConverter<?> converter:converters) {
+            if(converter instanceof MappingJackson2HttpMessageConverter)
+                ((MappingJackson2HttpMessageConverter)converter).getObjectMapper().disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        }
+    }
     @Override
     protected void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authorizationInterceptor).addPathPatterns("/**")

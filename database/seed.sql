@@ -232,3 +232,17 @@ insert  into `sys_role_permission`(`id`,`role_id`,`permission_id`) values
 (5765,7,595);
 UPDATE sys_permission SET pid = NULL WHERE pid = 0 OR pid = id;
 UPDATE sys_permission SET deleted = id WHERE page = 'Dashboard';
+
+-- V003 初始规则，执行新库种子当日生效。
+INSERT INTO attendance_policy(effective_from,start_time,end_time,grace_minutes,created_by,created_at)
+SELECT CURRENT_DATE(),
+  CAST(COALESCE(MAX(CASE WHEN name='上班时间' THEN time END),'08:00') AS TIME),
+  CAST(COALESCE(MAX(CASE WHEN name='下班时间' THEN time END),'18:00') AS TIME),
+  0,0,CURRENT_TIMESTAMP() FROM rules;
+
+-- records.edit在新口径仅用于补卡审批，原始事件改写入口已关闭。
+UPDATE sys_permission SET name='补卡申请审批' WHERE auth='records.edit' AND deleted=0;
+INSERT INTO sys_role_permission(role_id,permission_id)
+SELECT r.id,p.id FROM sys_role r JOIN sys_permission p ON p.auth='records.edit' AND p.deleted=0
+WHERE r.flag='manager' AND r.deleted=0
+AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp WHERE rp.role_id=r.id AND rp.permission_id=p.id);

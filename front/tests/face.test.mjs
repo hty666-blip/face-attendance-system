@@ -58,7 +58,7 @@ test('未知结果重试复用原会话、照片和地址，重复点击不并�
     if (calls.length === 2) throw new Error('timeout')
     return new Promise(done => {resolve = done})
   }}
-  const attempt = new CheckInAttempt(api); await attempt.prepare()
+  const attempt = new CheckInAttempt(api); await attempt.prepare('IN')
   await attempt.capture('private-image', 'original-address'); assert.equal(attempt.phase, 'uncertain')
   const retry = attempt.submit(); assert.equal(attempt.phase, 'verifying')
   assert.equal(await attempt.submit(), false); assert.equal(calls.length, 3)
@@ -69,7 +69,7 @@ test('未知结果重试复用原会话、照片和地址，重复点击不并�
 test('处理中保留请求，业务失败要求新会话', async () => {
   let response = {code: '425', msg: '处理中'}
   const attempt = new CheckInAttempt({post: async path => path === '/face/challenge' ? ready : response})
-  await attempt.prepare(); await attempt.capture('sample', 'address')
+  await attempt.prepare('IN'); await attempt.capture('sample', 'address')
   assert.equal(attempt.phase, 'processing'); assert.equal(attempt.attempt.imageBase, 'sample')
   response = {code: '422', msg: '未通过'}; await attempt.submit()
   assert.equal(attempt.phase, 'failed'); assert.equal(attempt.attempt, null); assert.equal(attempt.session, null)
@@ -78,6 +78,6 @@ test('处理中保留请求，业务失败要求新会话', async () => {
 test('离开页面清除照片，晚到会话响应不能恢复状态', async () => {
   let resolve
   const attempt = new CheckInAttempt({post: () => new Promise(done => {resolve = done})})
-  const pending = attempt.prepare(); attempt.clear(); resolve(ready); await pending
+  const pending = attempt.prepare('IN'); attempt.clear(); resolve(ready); await pending
   assert.equal(attempt.phase, 'idle'); assert.equal(attempt.session, null); assert.equal(attempt.attempt, null)
 })

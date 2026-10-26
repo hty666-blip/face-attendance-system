@@ -68,7 +68,7 @@ class FaceWorkflowTest extends SecurityFixture {
     @Test void anotherUserExpiredAndReplacedTemplateCannotUseSession() throws Exception {
         enroll();String id=challenge();
         verifyFace(id,manager).andExpect(jsonPath("$.code").value("403"));
-        db.update("UPDATE face_checkin_session SET expires_at=DATEADD('MINUTE',-1,CURRENT_TIMESTAMP) WHERE id=?",id);
+        db.update("UPDATE face_checkin_session SET expires_at=? WHERE id=?",NOW.minusMinutes(1),id);
         verifyFace(id,employee).andExpect(jsonPath("$.code").value("409"));
         String second=challenge();enroll();verifyFace(second,employee).andExpect(jsonPath("$.code").value("409"));
         assertEquals(2,db.queryForObject("SELECT COUNT(*) FROM records",Integer.class));
