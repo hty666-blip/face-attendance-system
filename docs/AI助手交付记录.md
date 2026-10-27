@@ -2,6 +2,8 @@
 
 日期：2026-10-26（Asia/Shanghai）。对应《AI助手设计.md》，前置报表中心提交9ecc76a。保留Vue 3、Spring Boot 2.7、Java 8语言目标、MySQL、现有Python FastAPI与OpenCV；本轮增加LangChain Core与ChatOpenAI集成，不引入LangGraph平台、向量库或新业务数据库。
 
+本文为2026-10-26首版阶段快照，其中“未配置真实模型”描述该阶段事实。2026-10-27已按用户配置完成DeepSeek两个真实业务样本，后续结果及限制见[DeepSeek接入交付记录](DeepSeek接入交付记录.md)，当前进度见[开发进度](开发进度.md)。
+
 本轮已完成首版实现、本地全量验证及隔离业务链路联调；提交后的GitHub CI状态以对应运行记录为准。没有真实模型凭据，未调用付费模型，不把显式Mock或合成SDK响应称为真实模型效果。
 
 ## 功能与请求链路

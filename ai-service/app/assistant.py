@@ -301,6 +301,11 @@ class ModelPlanner:
                            timeout=self.config.timeout_seconds, max_retries=0, max_tokens=600)
             if self.config.base_url:
                 options['base_url'] = self.config.base_url
+                if urlsplit(self.config.base_url).hostname == 'api.deepseek.com':
+                    # 此计划器只要短工具参数，不保存/续传思考内容。DeepSeek 默认思考开启。
+                    # ChatOpenAI 会将 max_tokens 改名，故按该 API 契约在正文保留原参数。
+                    options.pop('max_tokens')
+                    options['extra_body'] = {'thinking': {'type': 'disabled'}, 'max_tokens': 600}
             self._bound = ChatOpenAI(**options).bind_tools(tools, parallel_tool_calls=False, strict=True)
         return self._bound
 

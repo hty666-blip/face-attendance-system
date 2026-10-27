@@ -1,6 +1,8 @@
+﻿param([string]$ModelConfigPath)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'face-common.ps1')
 . (Join-Path $PSScriptRoot 'assistant-common.ps1')
+$startAssistant = {
 $assistantRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'ai-service'
 $assistantPython = Join-Path $assistantRoot '.venv/Scripts/python.exe'
 if (-not (Test-Path -LiteralPath $assistantPython)) { throw '请先运行 scripts/setup-ai.ps1。' }
@@ -10,10 +12,12 @@ $assistantSettings = Read-AssistantSettings -RequireToken
 $faceSettings = Read-FaceSecrets
 $previousAssistantToken = $env:ASSISTANT_INTERNAL_TOKEN
 $previousFaceToken = $env:FACE_INTERNAL_TOKEN
-$env:ASSISTANT_INTERNAL_TOKEN = $assistantSettings.ASSISTANT_INTERNAL_TOKEN
-$env:FACE_INTERNAL_TOKEN = $faceSettings.FACE_INTERNAL_TOKEN
-Push-Location -LiteralPath $assistantRoot
+$assistantPushedLocation = $false
 try {
+    $env:ASSISTANT_INTERNAL_TOKEN = $assistantSettings.ASSISTANT_INTERNAL_TOKEN
+    $env:FACE_INTERNAL_TOKEN = $faceSettings.FACE_INTERNAL_TOKEN
+    Push-Location -LiteralPath $assistantRoot
+    $assistantPushedLocation = $true
     Write-Host '本地能力服务：http://127.0.0.1:8010。与start-face共用一个进程，请只启动其中一种。'
     if ($env:ASSISTANT_PROVIDER -eq 'mock') { Write-Host '当前为明确的Mock演示模式，非真实AI；Java业务工具仍会按权限执行。' }
     & $assistantPython -m uvicorn app.main:app --host 127.0.0.1 --port 8010 --workers 1 --limit-concurrency 8 --timeout-keep-alive 5
@@ -21,5 +25,11 @@ try {
 } finally {
     $env:ASSISTANT_INTERNAL_TOKEN = $previousAssistantToken
     $env:FACE_INTERNAL_TOKEN = $previousFaceToken
-    Pop-Location
+    if ($assistantPushedLocation) { Pop-Location }
+}
+}
+if ($ModelConfigPath) {
+    Invoke-WithAssistantModelConfig -Path $ModelConfigPath -Operation $startAssistant
+} else {
+    & $startAssistant
 }

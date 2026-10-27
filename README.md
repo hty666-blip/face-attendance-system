@@ -1,6 +1,6 @@
 # 人脸识别考勤系统
 
-在本科毕业项目基础上持续完善的考勤管理系统，保留 Vue 3 + Spring Boot + MySQL。已完成基础修复、本地 OpenCV 人脸识别、固定日班考勤闭环、个人/当前部门人员月报与异步 Excel 导出，并实现 LangChain AI 考勤助手首版。助手默认关闭，当前只有显式 Mock 演示与合成测试证据，尚未配置或验证真实模型效果。
+在本科毕业项目基础上持续完善的考勤管理系统，保留 Vue 3 + Spring Boot + MySQL。已完成基础修复、本地 OpenCV 人脸识别、固定日班考勤闭环、个人/当前部门人员月报与异步 Excel 导出，以及 LangChain AI 考勤助手。助手默认关闭；DeepSeek真实模型已在独立合成环境通过本人汇总和部门导出两个业务闭环，尚未进行独立保留集效果评测或生产验证。
 
 ## 当前功能与技术
 
@@ -174,7 +174,17 @@ $env:ASSISTANT_PROVIDER = 'mock'
 
 再在Java终端设置同样的 `ASSISTANT_ENABLED=true`、`ASSISTANT_PROVIDER=mock`，按前述数据库配置启动后端；`start-backend.ps1` 会读取同一内部令牌。只演示聊天、不使用人脸时，该Java终端还可设置 `FACE_ENABLED=false`。Java与Python的Provider必须一致，否则拒绝执行。状态、每轮记录和页面持续标记“演示模式，非真实AI”；规则解析后执行的Java查询与导出仍是真实业务操作。
 
-真实模型模式须由管理员明确选择 `ASSISTANT_PROVIDER=openai-compatible`，在Python进程的受保护环境配置 `ASSISTANT_API_KEY`、`ASSISTANT_MODEL`，可选 `ASSISTANT_BASE_URL`；Java只配置Provider、内部地址与令牌，不需要模型Key。然后重启对应进程。没有自动选择付费型号、开通服务或从故障模型降级到Mock的行为。当前没有真实凭据，也没有“真实AI已联调”、完成率、模型费用或时延结论。
+真实模型模式须由管理员明确选择 `ASSISTANT_PROVIDER=openai-compatible`，在Python进程的受保护环境配置 `ASSISTANT_API_KEY`、`ASSISTANT_MODEL`，可选 `ASSISTANT_BASE_URL`；Java只配置Provider、内部地址与令牌，不需要模型Key。然后重启对应进程。没有自动选择付费型号、开通服务或从故障模型降级到Mock的行为。
+
+已填写本机 `.local/deepseek.ps1` 时，在项目根的Python服务终端显式运行：
+
+```powershell
+.\scripts\start-ai.ps1 -ModelConfigPath .local/deepseek.ps1
+```
+
+配置文件仅支持白名单环境变量到单引号字符串的静态赋值；启动器不会执行文件中的代码，未传参数不会自动读取或启用。DeepSeek本轮选用 `deepseek-flash`、`https://api.deepseek.com/beta`（严格工具模式）、关闭思考并限制600输出token；Key只保留在被忽略的本机文件和Python进程中。Java终端设置 `ASSISTANT_ENABLED=true`、`ASSISTANT_PROVIDER=openai-compatible`，再沿用自己的数据库配置启动后端；不要在Java终端加载模型Key文件。普通8010能力服务仍与人脸共用，只启动一种入口。
+
+本轮真实验证使用全新合成库，4次模型请求完成本人月汇总、部门月报导出及后续结束规划，11组HTTP检查通过。该样本不构成准确率、生产性能或费用结论；常规CI和一键演示仍无需真实Key并明确使用合成响应或Mock。配置与验证边界见[DeepSeek接入交付记录](docs/DeepSeek接入交付记录.md)。
 
 单轮60秒预算、最多5个工具、最多1个导出；每人同时最多一个运行。Python请求限200KiB，默认模型超时15秒、并发2；聊天与人脸限流独立，关闭外部LangSmith追踪。会话只显示本人最近20轮，给模型最多6轮历史和必要脱敏回执；已改变的历史权限会重新检查并隐藏失去访问权的业务结果。
 
@@ -246,6 +256,6 @@ GitHub Actions 包含后端验证、前端测试与构建、Python 3.12 单元�
 
 ## 后续计划与来源
 
-见 `docs/项目优化计划书.md`。LangChain查询与受控导出首版已实现，真实模型配置与独立保留集效果验证仍待完成；之后再考虑确认式申请。计划中的能力不能当作当前已实现功能。
+见 `docs/项目优化计划书.md`。LangChain查询与受控导出、DeepSeek真实模型的小样本闭环已完成；独立保留集效果评测、数据保留机制仍待完成，之后再考虑确认式申请。计划中的能力不能当作当前已实现功能。
 
 本地模型使用 [OpenCV 人脸检测与识别流程](https://docs.opencv.org/4.x/d0/dd4/tutorial_dnn_face.html)，YuNet 与 SFace 许可分别见模型目录文件。现有业务代码和静态素材来自原本科毕设，部分文件保留原有模板来源标记。仓库暂未另行赋予整套原始素材和模板统一开源许可，复用前应核对各自来源及依赖许可证。

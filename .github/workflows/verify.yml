@@ -71,3 +71,9 @@ jobs:
       - name: Verify PowerShell 7 demo safety
         shell: pwsh
         run: ./scripts/tests/demo-safety.test.ps1
+      - name: Verify Windows PowerShell 5.1 private model configuration
+        shell: powershell
+        run: ./scripts/test-assistant-model-config.ps1
+      - name: Verify PowerShell 7 private model configuration
+        shell: pwsh
+        run: ./scripts/test-assistant-model-config.ps1

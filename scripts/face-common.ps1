@@ -1,4 +1,4 @@
-function Read-FaceSecrets {
+﻿function Read-FaceSecrets {
     param(
         [switch]$RequireTemplateKey,
         [switch]$RequireToken
