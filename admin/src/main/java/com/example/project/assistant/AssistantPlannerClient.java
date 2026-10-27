@@ -4,7 +4,13 @@ import com.fasterxml.jackson.databind.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResponseErrorHandler;
+import org.springframework.web.client.RestTemplate;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.*;
 
@@ -34,7 +40,7 @@ public class AssistantPlannerClient {
         if(!enabled){result.put("reason","ASSISTANT_DISABLED");return result;}
         if(token.length()<32){result.put("reason","ASSISTANT_NOT_CONFIGURED");return result;}
         try {
-            JsonNode health=request("/assistant/health",null,3);
+            JsonNode health=request("/assistant/health",null,3000);
             if(!CONTRACT.equals(health.path("contractVersion").asText()) || !mode().equals(health.path("mode").asText())) throw new PlannerFailure("CONTRACT_MISMATCH");
             boolean ready=health.path("ready").asBoolean(false);result.put("ready",ready);result.put("reason",ready?null:"ASSISTANT_NOT_READY");
         } catch(PlannerFailure failure){result.put("reason",failure.code);}
@@ -43,24 +49,67 @@ public class AssistantPlannerClient {
     public JsonNode plan(Map<String,Object> input,long remainingMillis) {
         if(!enabled) throw new PlannerFailure("ASSISTANT_DISABLED");
         if(token.length()<32) throw new PlannerFailure("ASSISTANT_NOT_CONFIGURED");
-        JsonNode result=request("/assistant/v1/plan",input,Math.max(1,Math.min(20,remainingMillis/1000)));
+        if(remainingMillis<=0) throw new PlannerFailure("MODEL_TIMEOUT");
+        JsonNode result=request("/assistant/v1/plan",input,Math.min(32000,remainingMillis));
         if(!CONTRACT.equals(result.path("contractVersion").asText()) || !mode().equals(result.path("mode").asText()) ||
                 !result.path("toolCalls").isArray() || result.path("toolCalls").size()>1 ||
                 !result.path("message").isTextual() || result.path("message").asText().length()>2000)
             throw new PlannerFailure("MODEL_INVALID_RESPONSE");
         return result;
     }
-    private JsonNode request(String path,Object input,long seconds) {
+    private JsonNode request(String path,Object input,long millis) {
         HttpHeaders headers=new HttpHeaders();headers.setContentType(MediaType.APPLICATION_JSON);headers.set("X-Assistant-Service-Token",token);
         // 分轮使用有界超时的独立请求，主动关闭连接，避免占满本地ASGI的小并发预算。
         headers.set(HttpHeaders.CONNECTION,"close");
         try {
-            ResponseEntity<String> response=builder.setConnectTimeout(Duration.ofSeconds(2)).setReadTimeout(Duration.ofSeconds(seconds)).build()
-                    .exchange(url+path,input==null?HttpMethod.GET:HttpMethod.POST,new HttpEntity<>(input,headers),String.class);
-            String body=response.getBody();if(body==null || body.length()>200*1024) throw new PlannerFailure("MODEL_INVALID_RESPONSE");
-            return json.readTree(body);
+            RestTemplate template=builder.setConnectTimeout(Duration.ofMillis(Math.min(2000,millis))).setReadTimeout(Duration.ofMillis(millis)).build();
+            // 默认错误处理器会先完整读取错误正文；统一在有界读取后分类。
+            template.setErrorHandler(new ResponseErrorHandler(){
+                @Override public boolean hasError(ClientHttpResponse response){return false;}
+                @Override public void handleError(ClientHttpResponse response){}
+            });
+            return template.execute(url+path,input==null?HttpMethod.GET:HttpMethod.POST,request -> {
+                request.getHeaders().putAll(headers);
+                if(input!=null) json.writeValue(request.getBody(),input);
+            },response -> {
+                byte[] bytes=readBounded(response.getBody());
+                int status=response.getRawStatusCode();
+                if(status<200 || status>=300){
+                    if(status==504){
+                        try {
+                            JsonNode error=json.readTree(bytes);
+                            if(error!=null && error.isObject() && error.path("code").isTextual() && "MODEL_TIMEOUT".equals(error.path("code").textValue()))
+                                throw new PlannerFailure("MODEL_TIMEOUT");
+                        } catch(PlannerFailure failure){throw failure;}
+                        catch(Exception ignored){}
+                    }
+                    throw new PlannerFailure("PLANNER_UNAVAILABLE");
+                }
+                if(bytes.length==0) throw new PlannerFailure("MODEL_INVALID_RESPONSE");
+                return json.readTree(bytes);
+            });
         }catch(PlannerFailure failure){throw failure;}
-        catch(Exception ignored){throw new PlannerFailure("PLANNER_UNAVAILABLE");}
+        catch(Exception failure){
+            Throwable cause=failure;
+            for(int depth=0;cause!=null && depth<16;depth++,cause=cause.getCause()){
+                if(cause instanceof SocketTimeoutException) throw new PlannerFailure("MODEL_TIMEOUT");
+            }
+            throw new PlannerFailure("PLANNER_UNAVAILABLE");
+        }
+    }
+    private byte[] readBounded(InputStream body) throws java.io.IOException {
+        if(body==null) throw new PlannerFailure("MODEL_INVALID_RESPONSE");
+        try {
+            ByteArrayOutputStream output=new ByteArrayOutputStream();byte[] buffer=new byte[4096];int count;
+            while((count=body.read(buffer))!=-1){
+                if(output.size()+count>200*1024) throw new PlannerFailure("MODEL_INVALID_RESPONSE");
+                output.write(buffer,0,count);
+            }
+            return output.toByteArray();
+        } finally {
+            // 先关闭正文，避免响应清理阶段继续 drain 已超限的剩余内容。
+            try {body.close();}catch(java.io.IOException ignored){}
+        }
     }
     public static class PlannerFailure extends RuntimeException {
         public final String code;

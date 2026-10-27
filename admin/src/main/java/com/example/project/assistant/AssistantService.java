@@ -96,7 +96,7 @@ public class AssistantService {
                 if(!"SUCCEEDED".equals(receipt.getState())){finish(row,"FAILED",receipt.getErrorCode(),null);break;}
             }
         }catch(BudgetExceeded ignored){finish(row,"TIMED_OUT","RUN_TIMEOUT",null);}
-        catch(AssistantPlannerClient.PlannerFailure failure){finish(row,"FAILED",failure.code,null);}
+        catch(AssistantPlannerClient.PlannerFailure failure){finish(row,"MODEL_TIMEOUT".equals(failure.code)?"TIMED_OUT":"FAILED",failure.code,null);}
         catch(ServiceException failure){finish(row,"FAILED",safeCode(failure),null);}
         catch(Exception ignored){finish(row,"FAILED","ASSISTANT_FAILED",null);}
         return runView(ownedRun(row.getId(),actor.getId()));

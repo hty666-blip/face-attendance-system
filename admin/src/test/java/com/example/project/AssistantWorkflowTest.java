@@ -128,6 +128,30 @@ class AssistantWorkflowTest extends SecurityFixture {
         long id=conversation(employee);JsonNode result=run(employee,input(id));assertEquals("FAILED",result.path("data").path("state").asText());assertEquals(1,getJson(employee,"/assistant/conversations/"+id).path("data").path("runs").size());
         assertEquals("200",getJson(employee,"/face/status").path("code").asText());
     }
+    @Test void modelTimeoutBeforeToolsIsTerminalAndOriginalRequestDoesNotCallPlannerAgain() throws Exception {
+        when(planner.plan(anyMap(),anyLong())).thenThrow(new AssistantPlannerClient.PlannerFailure("MODEL_TIMEOUT"));
+        long conversation=conversation(employee);Map<String,Object> input=input(conversation);JsonNode first=run(employee,input);ok(first);
+        JsonNode result=first.path("data");assertEquals("TIMED_OUT",result.path("state").asText());assertEquals("MODEL_TIMEOUT",result.path("errorCode").asText());
+        assertTrue(result.path("answer").asText().contains("已超时"));assertEquals(0,count("attendance_export_job"));assertEquals(0,count("assistant_tool_call"));
+        assertEquals(result,getJson(employee,"/assistant/runs/by-request?requestKey="+input.get("requestKey")).path("data"));
+        assertEquals(result,run(employee,input).path("data"));assertEquals(1,count("assistant_run"));verify(planner,times(1)).plan(anyMap(),anyLong());
+        assertEquals("200",getJson(employee,"/face/status").path("code").asText());
+    }
+    @Test void timeoutAfterCommittedExportKeepsReceiptAndNeverReplaysTheTask() throws Exception {
+        when(planner.plan(anyMap(),anyLong())).thenAnswer(invocation -> {
+            if(((List<?>)((Map<?,?>)invocation.getArgument(0)).get("steps")).isEmpty())
+                return plan("create_attendance_export",map("month","2026-10","scope","SELF","deptId",null));
+            throw new AssistantPlannerClient.PlannerFailure("MODEL_TIMEOUT");
+        });
+        long conversation=conversation(employee);Map<String,Object> input=input(conversation);JsonNode first=run(employee,input);ok(first);JsonNode result=first.path("data");
+        assertEquals("TIMED_OUT",result.path("state").asText());assertEquals("MODEL_TIMEOUT",result.path("errorCode").asText());assertEquals(1,result.path("tools").size());
+        JsonNode receipt=result.path("tools").get(0);assertEquals("SUCCEEDED",receipt.path("state").asText());assertTrue(receipt.path("data").path("id").asLong()>0);
+        assertTrue(result.path("answer").asText().contains("已创建导出任务"));assertTrue(result.path("answer").asText().contains("已超时"));
+        assertEquals(result,getJson(employee,"/assistant/runs/by-request?requestKey="+input.get("requestKey")).path("data"));
+        assertEquals(result,getJson(employee,"/assistant/runs/"+result.path("id").asText()).path("data"));assertEquals(result,run(employee,input).path("data"));
+        assertEquals(1,count("attendance_export_job"));assertEquals(1,count("assistant_tool_call"));assertEquals(1,count("assistant_run"));verify(planner,times(2)).plan(anyMap(),anyLong());
+        assertCode("403",getJson(manager,"/assistant/runs/"+result.path("id").asText()));
+    }
     @Test void departmentReceiptPrivateProofsNeverEnterHttpOrPlanner() throws Exception {
         planTool("query_attendance_summary",map("month","2026-10","scope","DEPARTMENT","deptId",1));
         JsonNode result=run(manager,input(conversation(manager)));ok(result);assertEquals("COMPLETED",result.path("data").path("state").asText());
