@@ -14,7 +14,7 @@ function Assert-SafetyThrows {
     Assert-Safety $threw $Message
 }
 function Write-SafetyFixtureDiagnostic {
-    param($Child,[string]$ErrorPath)
+    param($Child,[string]$ErrorPath,[string]$StagePath,[string]$ReleasePath)
     $code=if($Child.Process.HasExited){[string]$Child.Process.ExitCode}else{'still-running'}
     $text=''
     if (Test-Path -LiteralPath $ErrorPath -PathType Leaf) {
@@ -29,6 +29,16 @@ function Write-SafetyFixtureDiagnostic {
         finally { if($reader){$reader.Dispose()}elseif($inputStream){$inputStream.Dispose()} }
     }
     Write-Host ('Controlled lock fixture: exit=' + $code + '; stderr=' + $text)
+    $stages='unavailable'
+    try {
+        if($StagePath -and [IO.File]::Exists($StagePath)){
+            $allowed=@('ready-written','sleep-before','sleep-after','release-observed','lock-disposed','stdout-written','stderr-written','returning')
+            $known=@([IO.File]::ReadAllLines($StagePath) | Where-Object { $allowed -ccontains $_ })
+            $stages=$known -join ','
+        }
+    }catch{}
+    $released=$ReleasePath -and [IO.File]::Exists($ReleasePath)
+    Write-Host ('Controlled lock stages=[' + $stages + ']; release=' + $released + '; stdoutTask=' + $Child.OutTask.Status + '; stderrTask=' + $Child.ErrTask.Status)
 }
 $testRoot=Get-DemoProjectRoot
 $testRun=[Guid]::NewGuid().ToString('N')
@@ -209,23 +219,33 @@ try {
     # 只启动一个无业务、无子进程的PowerShell夹具，验证实际Windows参数和环境传递。
     $fixture=Join-Path $testDirectory 'argument-fixture.ps1'
     $fixtureText=@'
-param([string]$Value,[string]$StopLockPath,[string]$ReadyPath,[string]$ReleasePath)
+param([string]$Value,[string]$StopLockPath,[string]$ReadyPath,[string]$ReleasePath,[string]$StagePath)
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 if($env:DB_URL){exit 31}
+function Write-FixtureStage([string]$Name){if($StagePath){[IO.File]::AppendAllText($StagePath,$Name+[Environment]::NewLine)}}
 if($StopLockPath){
     $hold=[IO.File]::Open($StopLockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
     try{
         [IO.File]::WriteAllText($ReadyPath,'ready')
+        Write-FixtureStage 'ready-written'
         $deadline=[DateTime]::UtcNow.AddSeconds(30)
+        $firstSleep=$true
         while(-not [IO.File]::Exists($ReleasePath)){
             if([DateTime]::UtcNow -ge $deadline){[Console]::Error.Write('synthetic release handshake timeout');exit 32}
-            Start-Sleep -Milliseconds 25
+            if($firstSleep){Write-FixtureStage 'sleep-before'}
+            [Threading.Thread]::Sleep(25)
+            if($firstSleep){Write-FixtureStage 'sleep-after';$firstSleep=$false}
         }
+        Write-FixtureStage 'release-observed'
     }finally{$hold.Dispose()}
+    Write-FixtureStage 'lock-disposed'
 }
 [Console]::Out.Write([string]$Value)
+Write-FixtureStage 'stdout-written'
 [Console]::Error.Write('stderr-ok')
+Write-FixtureStage 'stderr-written'
+Write-FixtureStage 'returning'
 '@
     [IO.File]::WriteAllText($fixture,$fixtureText,[Text.UTF8Encoding]::new($false))
     $executable=Resolve-DemoExecutable -Command 'powershell.exe'
@@ -242,16 +262,17 @@ if($StopLockPath){
     Assert-Safety ($errorText -ceq 'stderr-ok') 'stdout/stderr异步日志均完成'
     $lockReady=Join-Path $testDirectory 'lock-ready.txt'
     $lockRelease=Join-Path $testDirectory 'lock-release.txt'
+    $lockStages=Join-Path $testDirectory 'lock-stages.txt'
     $lockErrorPath=Join-Path $testDirectory 'logs/safety-lock.err.log'
-    $testChild=Start-DemoChild 'safety-lock' $executable @('-NoProfile','-NonInteractive','-File',$fixture,'-Value','synthetic-lock','-StopLockPath',(Join-Path $testDirectory '.stop.lock'),'-ReadyPath',$lockReady,'-ReleasePath',$lockRelease) $testDirectory $environment $testDirectory
+    $testChild=Start-DemoChild 'safety-lock' $executable @('-NoProfile','-NonInteractive','-File',$fixture,'-Value','synthetic-lock','-StopLockPath',(Join-Path $testDirectory '.stop.lock'),'-ReadyPath',$lockReady,'-ReleasePath',$lockRelease,'-StagePath',$lockStages) $testDirectory $environment $testDirectory
     $lockDeadline=[DateTime]::UtcNow.AddSeconds(25)
     while (-not (Test-Path -LiteralPath $lockReady) -and -not $testChild.Process.HasExited -and [DateTime]::UtcNow -lt $lockDeadline) { Start-Sleep -Milliseconds 25 }
-    if(-not (Test-Path -LiteralPath $lockReady)){Write-SafetyFixtureDiagnostic $testChild $lockErrorPath}
+    if(-not (Test-Path -LiteralPath $lockReady)){Write-SafetyFixtureDiagnostic $testChild $lockErrorPath $lockStages $lockRelease}
     Assert-Safety (Test-Path -LiteralPath $lockReady -PathType Leaf) '受控子进程已持有同轮停止锁'
     Assert-SafetyThrows { Enter-DemoStopLock $testRoot $testRun -TimeoutMilliseconds 100 } '跨进程锁阻止并行清理'
     [IO.File]::WriteAllText($lockRelease,'release')
     $lockExited=$testChild.Process.WaitForExit(25000)
-    if(-not $lockExited -or $testChild.Process.ExitCode -ne 0){Write-SafetyFixtureDiagnostic $testChild $lockErrorPath}
+    if(-not $lockExited -or $testChild.Process.ExitCode -ne 0){Write-SafetyFixtureDiagnostic $testChild $lockErrorPath $lockStages $lockRelease}
     Assert-Safety $lockExited '释放信号后持锁子进程按时退出'
     Assert-Safety ($testChild.Process.ExitCode -eq 0) '持锁子进程正常退出码'
     Close-DemoChildHandles $testChild;$testChild=$null
@@ -273,7 +294,7 @@ if($StopLockPath){
     }
     if ($testDirectory -and (Test-Path -LiteralPath $testDirectory)) {
         # 仅删除本测试明确创建的文件和空目录，无递归删除。
-        foreach ($relative in @('manifest.json','argument-fixture.ps1','logs/safety.out.log','logs/safety.err.log','logs/safety-lock.out.log','logs/safety-lock.err.log','lock-ready.txt','lock-release.txt','.stop.lock','files/keep.txt')) {
+        foreach ($relative in @('manifest.json','argument-fixture.ps1','logs/safety.out.log','logs/safety.err.log','logs/safety-lock.out.log','logs/safety-lock.err.log','lock-ready.txt','lock-release.txt','lock-stages.txt','.stop.lock','files/keep.txt')) {
             $testFile=Join-Path $testDirectory $relative
             if (Test-Path -LiteralPath $testFile) { Remove-Item -LiteralPath $testFile -Force }
         }
