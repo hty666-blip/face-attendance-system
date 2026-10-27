@@ -6,6 +6,10 @@ import com.example.project.service.IEmployeeService;
 import com.fasterxml.jackson.databind.*;
 import cn.dev33.satoken.secure.BCrypt;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,6 +21,7 @@ import org.springframework.test.web.servlet.*;
 import org.apache.poi.ss.usermodel.*;
 import java.io.ByteArrayInputStream;
 import java.util.*;
+import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -143,6 +148,100 @@ class FoundationSecurityTest extends SecurityFixture {
         assertEquals("新姓名",db.queryForObject("SELECT name FROM sys_user WHERE id=?",String.class,userId));
         assertEquals(userId,db.queryForObject("SELECT user_id FROM employee WHERE id=?",Integer.class,profile));
         assertEquals("newstaff",db.queryForObject("SELECT username FROM employee WHERE id=?",String.class,profile));
+    }
+    static Stream<Arguments> personnelUsernames() {
+        return Stream.of("employee", "manager").flatMap(role -> Stream.of(
+                "abcdefghijklmn", "abcdefghijklmno", repeated('a',64), "合成人员账号", "staff@branch")
+                .map(username -> Arguments.of(role,username)));
+    }
+    @ParameterizedTest(name="{0} can create and log in with username {1}")
+    @MethodSource("personnelUsernames")
+    void personnelCreationPreservesSupportedUsernameAndLogin(String role,String username) throws Exception {
+        createPersonnel(role,username,admin,"200");
+        assertPersonnelSavedAndCanLogin(role,username);
+    }
+    @ParameterizedTest
+    @ValueSource(strings={"employee","manager"})
+    void personnelWithSharedLongPrefixHaveDistinctAccountsAndEmails(String role) throws Exception {
+        String first=repeated('p',63)+"a", second=repeated('p',63)+"b";
+        createPersonnel(role,first,admin,"200");
+        createPersonnel(role,second,admin,"200");
+        String firstEmail=assertPersonnelSavedAndCanLogin(role,first);
+        String secondEmail=assertPersonnelSavedAndCanLogin(role,second);
+        assertNotEquals(firstEmail,secondEmail);
+    }
+    @ParameterizedTest
+    @ValueSource(strings={"employee","manager"})
+    void overlongPersonnelUsernameDoesNotCreateAccountOrProfile(String role) throws Exception {
+        int[] before=personnelCounts();
+        createPersonnel(role,repeated('a',65),admin,"500");
+        assertArrayEquals(before,personnelCounts());
+    }
+    @ParameterizedTest
+    @ValueSource(strings={"employee","manager"})
+    void duplicatePersonnelUsernameDoesNotCreateAccountOrProfile(String role) throws Exception {
+        String username="same_"+role;
+        createPersonnel(role,username,admin,"200");
+        int[] before=personnelCounts();
+        createPersonnel(role,username,admin,"500");
+        assertArrayEquals(before,personnelCounts());
+        assertPersonnelSavedAndCanLogin(role,username);
+    }
+    @ParameterizedTest
+    @ValueSource(strings={"employee","manager"})
+    void personnelCreationRequiresAdminDespiteGrantedActionPermission(String role) throws Exception {
+        int[] before=personnelCounts();
+        for(int grantedRole:Arrays.asList(2,3))
+            assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id WHERE rp.role_id=? AND p.auth=?",Integer.class,grantedRole,role+".add"));
+        for(String token:Arrays.asList(manager,employee))
+            createPersonnel(role,"blocked",token,"403");
+        assertArrayEquals(before,personnelCounts());
+    }
+    @ParameterizedTest
+    @ValueSource(strings={"employee","manager"})
+    void adminPersonnelCreationRequiresCurrentAddPermission(String role) throws Exception {
+        int[] before=personnelCounts();
+        assertEquals(1,db.update("DELETE FROM sys_role_permission WHERE role_id=1 AND permission_id IN(SELECT id FROM sys_permission WHERE auth=?)",role+".add"));
+        createPersonnel(role,"blocked",admin,"403");
+        assertArrayEquals(before,personnelCounts());
+    }
+    private void createPersonnel(String role,String username,String token,String expectedCode) throws Exception {
+        Map<String,Object> request=new HashMap<>();
+        request.put("username",username); request.put("name","合成人员");
+        request.put("deptId",1); request.put("initialPassword",PASSWORD);
+        mvc.perform(post("/"+role).header("Authorization",token).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(request)))
+                .andExpect(jsonPath("$.code").value(expectedCode));
+    }
+    private String assertPersonnelSavedAndCanLogin(String role,String username) throws Exception {
+        Integer userId=db.queryForObject("SELECT id FROM sys_user WHERE username=?",Integer.class,username);
+        assertEquals(username,db.queryForObject("SELECT username FROM sys_user WHERE id=?",String.class,userId));
+        assertEquals(role,db.queryForObject("SELECT role FROM sys_user WHERE id=?",String.class,userId));
+        assertEquals("合成人员",db.queryForObject("SELECT name FROM sys_user WHERE id=?",String.class,userId));
+        String email=db.queryForObject("SELECT email FROM sys_user WHERE id=?",String.class,userId);
+        assertNotNull(email); assertTrue(email.length()<=30);
+        assertTrue(email.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+"));
+        String hash=db.queryForObject("SELECT password FROM sys_user WHERE id=?",String.class,userId);
+        assertNotEquals(PASSWORD,hash); assertTrue(BCrypt.checkpw(PASSWORD,hash));
+        assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM "+role+" WHERE user_id=?",Integer.class,userId));
+        assertEquals(username,db.queryForObject("SELECT username FROM "+role+" WHERE user_id=?",String.class,userId));
+        assertEquals("合成人员",db.queryForObject("SELECT name FROM "+role+" WHERE user_id=?",String.class,userId));
+        assertEquals(1,db.queryForObject("SELECT dept_id FROM "+role+" WHERE user_id=?",Integer.class,userId));
+        for(String identifier:Arrays.asList(username,email)) {
+            String token=login(identifier);
+            mvc.perform(get("/getCurrentUser").header("Authorization",token))
+                    .andExpect(jsonPath("$.id").value(userId)).andExpect(jsonPath("$.username").value(username))
+                    .andExpect(jsonPath("$.role").value(role));
+        }
+        return email;
+    }
+    private int[] personnelCounts() {
+        return new int[]{db.queryForObject("SELECT COUNT(*) FROM sys_user",Integer.class),
+                db.queryForObject("SELECT COUNT(*) FROM employee",Integer.class),
+                db.queryForObject("SELECT COUNT(*) FROM manager",Integer.class)};
+    }
+    private static String repeated(char value,int count) {
+        char[] chars=new char[count]; Arrays.fill(chars,value); return new String(chars);
     }
     @Test void managerWithoutDepartmentGetsEmptyPageAndExport() throws Exception {
         db.update("UPDATE dept SET user_id=3 WHERE id=1");

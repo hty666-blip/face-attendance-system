@@ -1,6 +1,7 @@
 package com.example.project.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.example.project.entity.*;
@@ -43,7 +44,8 @@ public class AccountLifecycleService {
     }
     private User newUser(String username, String name, String password, String role) {
         User u = new User(); u.setUsername(username); u.setName(name); u.setPassword(password);
-        u.setRole(role); u.setEmail(username + "@example.invalid"); return u;
+        // 人员表单未采集邮箱；占位地址与用户名解耦，并满足现有30字符列及邮箱校验。
+        u.setRole(role); u.setEmail(RandomUtil.randomString(14) + "@example.invalid"); return u;
     }
     private void checkDepartment(Integer id) {
         if (id != null && departments.getById(id) == null) throw new ServiceException("部门不存在");
