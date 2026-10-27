@@ -199,11 +199,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         user.setPassword(BCrypt.hashpw(user.getPassword()));  // BCrypt加密
         // 设置唯一标识
         user.setUid(IdUtil.fastSimpleUUID());
+        boolean saved;
         try {
-            save(user);
+            saved = save(user);
         } catch (Exception e) {
             throw new RuntimeException("注册失败", e);
         }
+        if (!saved) throw new ServiceException("账号创建失败，请稍后重试");
         return user;
     }
 

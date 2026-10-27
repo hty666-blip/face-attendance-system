@@ -26,21 +26,27 @@ public class AccountLifecycleService {
         users.saveUser(input);
         if ("employee".equals(input.getRole())) {
             Employee e = new Employee(); e.setUsername(input.getUsername()); e.setName(input.getName());
-            e.setUserId(input.getId()); employees.save(e);
+            e.setUserId(input.getId()); saveEmployeeProfile(e);
         } else if ("manager".equals(input.getRole())) {
             Manager m = new Manager(); m.setUsername(input.getUsername()); m.setName(input.getName());
-            m.setUserId(input.getId()); managers.save(m);
+            m.setUserId(input.getId()); saveManagerProfile(m);
         }
     }
     @Transactional public void createEmployee(Employee input) {
         checkDepartment(input.getDeptId());
         User u = newUser(input.getUsername(), input.getName(), input.getInitialPassword(), "employee");
-        users.saveUser(u); input.setId(null); input.setUserId(u.getId()); employees.save(input);
+        users.saveUser(u); input.setId(null); input.setUserId(u.getId()); saveEmployeeProfile(input);
     }
     @Transactional public void createManager(Manager input) {
         checkDepartment(input.getDeptId());
         User u = newUser(input.getUsername(), input.getName(), input.getInitialPassword(), "manager");
-        users.saveUser(u); input.setId(null); input.setUserId(u.getId()); managers.save(input);
+        users.saveUser(u); input.setId(null); input.setUserId(u.getId()); saveManagerProfile(input);
+    }
+    private void saveEmployeeProfile(Employee profile) {
+        if (!employees.save(profile)) throw new ServiceException("员工档案创建失败，请稍后重试");
+    }
+    private void saveManagerProfile(Manager profile) {
+        if (!managers.save(profile)) throw new ServiceException("主管档案创建失败，请稍后重试");
     }
     private User newUser(String username, String name, String password, String role) {
         User u = new User(); u.setUsername(username); u.setName(name); u.setPassword(password);

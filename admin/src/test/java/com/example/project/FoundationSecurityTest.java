@@ -2,7 +2,10 @@ package com.example.project;
 
 import com.example.project.common.FaceContrastServer;
 import com.example.project.entity.Employee;
+import com.example.project.entity.Manager;
+import com.example.project.entity.User;
 import com.example.project.service.IEmployeeService;
+import com.example.project.service.IManagerService;
 import com.fasterxml.jackson.databind.*;
 import cn.dev33.satoken.secure.BCrypt;
 import org.junit.jupiter.api.*;
@@ -21,6 +24,7 @@ import org.springframework.test.web.servlet.*;
 import org.apache.poi.ss.usermodel.*;
 import java.io.ByteArrayInputStream;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -29,6 +33,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class FoundationSecurityTest extends SecurityFixture {
+    @SpyBean IManagerService managers;
+
+    @BeforeEach void resetManagerSpy() { reset(managers); }
+
     @Test void anonymousCannotExportReadUsersResetOrDeleteNotice() throws Exception {
         for(String path:Arrays.asList("/user","/records/export","/employee/export","/file/download/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"))
             mvc.perform(get(path)).andExpect(jsonPath("$.code").value("401"));
@@ -106,6 +114,83 @@ class FoundationSecurityTest extends SecurityFixture {
                 .andExpect(jsonPath("$.code").value("500"));
         assertEquals(0,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE username='rollback'",Integer.class));
         verify(employees).save(any(Employee.class));
+    }
+    static Stream<Arguments> profileSaveFailureEntrypoints() {
+        return Stream.of(Arguments.of("/employee","employee"),Arguments.of("/manager","manager"),
+                Arguments.of("/user","employee"),Arguments.of("/user","manager"));
+    }
+    @ParameterizedTest(name="{0} creating {1} rolls back a profile save returning false")
+    @MethodSource("profileSaveFailureEntrypoints")
+    void falseProfileSaveRollsBackRealAccountAndProfileInsert(String path,String role) throws Exception {
+        int[] before=personnelCounts();
+        AtomicBoolean actualInsert=new AtomicBoolean();
+        if("employee".equals(role)) {
+            doAnswer(invocation -> {
+                Employee profile=invocation.getArgument(0);
+                assertTrue((Boolean)invocation.callRealMethod(),"注入 false 前必须执行成功的真实档案 INSERT");
+                assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM employee WHERE user_id=?",Integer.class,profile.getUserId()));
+                assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE id=?",Integer.class,profile.getUserId()));
+                actualInsert.set(true);
+                return false;
+            }).when(employees).save(any(Employee.class));
+        } else {
+            doAnswer(invocation -> {
+                Manager profile=invocation.getArgument(0);
+                assertTrue((Boolean)invocation.callRealMethod(),"注入 false 前必须执行成功的真实档案 INSERT");
+                assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM manager WHERE user_id=?",Integer.class,profile.getUserId()));
+                assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE id=?",Integer.class,profile.getUserId()));
+                actualInsert.set(true);
+                return false;
+            }).when(managers).save(any(Manager.class));
+        }
+        String username="failed_profile_"+role;
+        JsonNode result=body(createAccountAt(path,role,username));
+        assertTrue(actualInsert.get(),"回滚验证必须包含实际账号与档案 SQL 写入");
+        assertAll("档案 save 返回 false 必须使账号和档案一同回滚",
+                () -> assertEquals("500",result.path("code").asText()),
+                () -> assertArrayEquals(before,personnelCounts()),
+                () -> assertAccountCannotLogin(username));
+    }
+    static Stream<Arguments> accountSaveFailureEntrypoints() {
+        return Stream.concat(profileSaveFailureEntrypoints(),Stream.of(Arguments.of("/user","ADMIN")));
+    }
+    @ParameterizedTest(name="{0} creating {1} rolls back an account save returning false")
+    @MethodSource("accountSaveFailureEntrypoints")
+    void falseAccountSaveRollsBackRealInsertWithoutSavingProfile(String path,String role) throws Exception {
+        int[] before=personnelCounts();
+        AtomicBoolean actualInsert=new AtomicBoolean();
+        doAnswer(invocation -> {
+            User account=invocation.getArgument(0);
+            assertTrue((Boolean)invocation.callRealMethod(),"注入 false 前必须执行成功的真实账号 INSERT");
+            assertEquals(1,db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE id=?",Integer.class,account.getId()));
+            actualInsert.set(true);
+            return false;
+        }).when(userService).save(any(User.class));
+        String username="failed_account_"+role;
+        JsonNode result=body(createAccountAt(path,role,username));
+        assertTrue(actualInsert.get(),"回滚验证必须包含实际账号 SQL 写入");
+        assertAll("账号 save 返回 false 必须回滚并停止后续档案写入",
+                () -> assertEquals("500",result.path("code").asText()),
+                () -> assertArrayEquals(before,personnelCounts()),
+                () -> verify(employees,never()).save(any(Employee.class)),
+                () -> verify(managers,never()).save(any(Manager.class)),
+                () -> assertAccountCannotLogin(username));
+    }
+    private MvcResult createAccountAt(String path,String role,String username) throws Exception {
+        Map<String,Object> request=new HashMap<>();
+        request.put("username",username); request.put("name","合成人员");
+        if("/user".equals(path)) {
+            request.put("role",role); request.put("password",PASSWORD); request.put("email","false-case@test.invalid");
+        } else {
+            request.put("deptId",1); request.put("initialPassword",PASSWORD);
+        }
+        return mvc.perform(post(path).header("Authorization",admin).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(request))).andReturn();
+    }
+    private void assertAccountCannotLogin(String username) throws Exception {
+        Map<String,String> request=new HashMap<>(); request.put("username",username); request.put("password",PASSWORD);
+        mvc.perform(post("/login").contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(request)))
+                .andExpect(jsonPath("$.code").value("500")).andExpect(jsonPath("$.data.token").doesNotExist());
     }
     @Test void accountDeleteRevokesAccessAndPreservesAttendance() throws Exception {
         mvc.perform(delete("/employee/1").header("Authorization",admin)).andExpect(jsonPath("$.code").value("200"));
