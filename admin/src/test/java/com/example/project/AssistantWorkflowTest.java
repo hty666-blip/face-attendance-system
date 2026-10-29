@@ -123,6 +123,13 @@ class AssistantWorkflowTest extends SecurityFixture {
         db.update("INSERT INTO records(user_id,business_date,action,occurred_at,source,dept_id,address,create_time) VALUES(4,'2026-10-26','IN','2026-10-26 08:20:00','FACE',1,'private-address','2026-10-26 08:20:00')");
         planTool("explain_attendance_day",map("date","2026-10-26"));JsonNode result=run(employee,input(conversation(employee)));JsonNode day=result.path("data").path("tools").get(0).path("data");assertEquals(20,day.path("lateMinutes").asInt());assertEquals("FACE",day.path("checkIn").path("source").asText());assertFalse(result.toString().contains("private-address"));
     }
+    @Test void dailyExplanationReturnsChineseStatusFromActualAttendanceReceipt() throws Exception {
+        db.update("INSERT INTO records(user_id,business_date,action,occurred_at,source,dept_id,create_time) VALUES(4,'2026-10-23','IN','2026-10-23 08:15:00','CORRECTION',1,'2026-10-23 08:15:00'),(4,'2026-10-23','OUT','2026-10-23 17:45:00','CORRECTION',1,'2026-10-23 17:45:00')");
+        planTool("explain_attendance_day",map("date","2026-10-23"));JsonNode result=run(employee,input(conversation(employee)));ok(result);
+        JsonNode day=result.path("data").path("tools").get(0).path("data");
+        assertEquals("LATE_AND_EARLY",day.path("status").asText());assertEquals(15,day.path("lateMinutes").asInt());assertEquals(15,day.path("earlyMinutes").asInt());
+        String answer=result.path("data").path("answer").asText();assertTrue(answer.contains("本人日结果：迟到且早退"));assertTrue(answer.contains("迟到15分钟，早退15分钟"));assertFalse(answer.contains("LATE_AND_EARLY"));
+    }
     @Test void plannerFailureKeepsHistoryAndDoesNotExposeErrorDetails() throws Exception {
         when(planner.plan(anyMap(),anyLong())).thenThrow(new AssistantPlannerClient.PlannerFailure("PLANNER_UNAVAILABLE"));
         long id=conversation(employee);JsonNode result=run(employee,input(id));assertEquals("FAILED",result.path("data").path("state").asText());assertEquals(1,getJson(employee,"/assistant/conversations/"+id).path("data").path("runs").size());

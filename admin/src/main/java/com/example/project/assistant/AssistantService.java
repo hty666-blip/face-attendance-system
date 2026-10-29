@@ -179,7 +179,11 @@ public class AssistantService {
             if(!"SUCCEEDED".equals(receipt.getState())){lines.add("工具未执行成功："+toolError(receipt.getErrorCode()));continue;}
             switch(receipt.getToolName()) {
                 case "query_attendance_summary":JsonNode stats=data.path("statistics");lines.add(data.path("month").asText()+"月报已查询："+("SELF".equals(data.path("scope").asText())?"本人":"所选部门")+"，迟到"+stats.path("lateDays").asText("0")+"人次日、早退"+stats.path("earlyDays").asText("0")+"人次日、缺卡"+stats.path("missingDays").asText("0")+"人次日、请假"+stats.path("leaveDays").asText("0")+"人天。详见来源数据。");break;
-                case "explain_attendance_day":lines.add(data.path("businessDate").asText()+"本人日结果："+data.path("status").asText()+"，迟到"+data.path("lateMinutes").asText("0")+"分钟，早退"+data.path("earlyMinutes").asText("0")+"分钟，请假"+data.path("leaveDays").asText("0")+"天。");break;
+                case "explain_attendance_day":
+                    String dayLabel=dayStatusLabel(data);
+                    if("RESTRICTED".equals(data.path("status").textValue()))lines.add(data.path("businessDate").asText()+"本人日结果："+dayLabel+"。");
+                    else lines.add(data.path("businessDate").asText()+"本人日结果："+dayLabel+"，迟到"+data.path("lateMinutes").asText("0")+"分钟，早退"+data.path("earlyMinutes").asText("0")+"分钟，请假"+data.path("leaveDays").asText("0")+"天。");
+                    break;
                 case "create_attendance_export":lines.add("已创建导出任务 #"+data.path("id").asText()+"，回执状态："+data.path("state").asText()+"。文件需生成后到报表中心下载。");break;
                 case "get_export_status":lines.add("导出任务 #"+data.path("id").asText()+"，查询时状态："+data.path("state").asText()+"。");break;
                 default:break;
@@ -188,6 +192,27 @@ public class AssistantService {
         if(!Arrays.asList("COMPLETED","NEEDS_INPUT").contains(state))lines.add("本轮"+("TIMED_OUT".equals(state)?"已超时":"INTERRUPTED".equals(state)?"已中断":"未完成")+"，已提交的工具回执仍可查询；请核对已有任务后再发起新问题。");
         if(lines.isEmpty())return "本轮未执行业务工具。"+(clarification==null || clarification.trim().isEmpty()?"请提供明确月份、本人或部门范围，或需要查询的日期、任务编号。":"助手提示："+clip(clarification,1900));
         return String.join("\n",lines);
+    }
+    /** 与考勤工作台 dayLabel 的已知状态和缺卡优先级保持一致。 */
+    private static String dayStatusLabel(JsonNode day) {
+        JsonNode statusNode=day.path("status");String status=statusNode.isTextual()?statusNode.textValue():"";
+        if("RESTRICTED".equals(status))return "无权查看历史";
+        if((day.path("missingIn").isBoolean() && day.path("missingIn").booleanValue()) ||
+                (day.path("missingOut").isBoolean() && day.path("missingOut").booleanValue()))return "待核对 / 缺卡";
+        switch(status) {
+            case "NORMAL":case "PRESENT":return "正常";
+            case "LATE":return "迟到";
+            case "EARLY":return "早退";
+            case "LATE_AND_EARLY":return "迟到且早退";
+            case "MISSING":case "MISSING_CARD":return "待核对 / 缺卡";
+            case "LEAVE":case "ON_LEAVE":return "已请假";
+            case "IN_PROGRESS":return "进行中";
+            case "REST":case "REST_DAY":return "休息日";
+            case "UPCOMING":case "FUTURE":return "尚未到来";
+            case "LEGACY":return "旧数据不推算";
+            case "NOT_APPLICABLE":return "未启用新口径";
+            default:return "待核对";
+        }
     }
     public void recoverExpired() {
         List<AssistantRun> expired=runs.selectList(new QueryWrapper<AssistantRun>().eq("state","RUNNING").le("deadline_at",clock.now()));
